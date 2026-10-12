@@ -144,6 +144,8 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 .rcell.cur{outline:4px solid var(--active);outline-offset:1px}
 .rcell small{font-size:.75rem;color:var(--ink2)}
 .rcell .rn{font-size:1.35rem;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px}
 .ex{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;background:var(--surface2);border-radius:10px;padding:8px 12px;margin:6px 0 10px;font-size:.88rem;align-items:center}
 .ex span{font-family:var(--mono);font-weight:700;font-size:1rem}
 .ex i{color:var(--ink2);font-style:normal}
@@ -177,7 +179,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -193,9 +195,14 @@ const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + 
 function blank() {
   return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
            strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null,
-           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, mods: 6 } } };
+           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, bottom: 6, mid: 6, top: 6 } } };
 }
-function norm(o) { const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, (o.room && o.room.def) || {}) }) }); }
+function norm(o) {
+  const b = blank(), od = (o.room && o.room.def) || {};
+  const s = Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, od) }) });
+  if (od.mods != null && od.bottom == null) { s.room.def.bottom = s.room.def.mid = s.room.def.top = od.mods; }   // older saved data
+  return s;
+}
 function loadDB() {
   const db = { systems: [], activeId: null, prefs: { res: 'high', engine: 'auto' } };
   try {
@@ -407,7 +414,7 @@ function deleteSystem() {
 function nextName() { const nums = S.strings.map(s => parseInt(s.name, 10)).filter(n => !isNaN(n)); return String((nums.length ? Math.max(...nums) : 0) + 1); }
 function startLayout(st, place) {
   if (st) draft = { id: st.id, name: st.name, shelves: st.shelves.slice(), isNew: false, placeAt: null };
-  else { const last = S.strings[S.strings.length - 1]; draft = { id: uid(), name: nextName(), shelves: last ? last.shelves.slice() : [6, 6], isNew: true, placeAt: place || null }; }
+  else { const last = S.strings[S.strings.length - 1]; draft = { id: uid(), name: nextName(), shelves: last ? last.shelves.slice() : defLayout(), isNew: true, placeAt: place || null }; }
   go('layout');
 }
 function rackPreview(shelves, slots, activePos, withSerial) {
@@ -444,6 +451,9 @@ function renderLayout() {
     <h3>Modules on each shelf</h3>
     <div>${rows}</div>
     <div class="row" style="margin-top:10px"><input id="allN" type="number" inputmode="numeric" min="1" max="30" placeholder="Same for all shelves"><button class="btn fix" id="applyAll">Apply</button></div>
+    <p class="hint" style="margin:10px 0 4px">Or set the bottom, middle and top shelves separately:</p>
+    <div class="trio"><div><div class="hint" style="margin:0 0 4px">Bottom shelf</div><input id="bN" type="number" inputmode="numeric" min="1" max="30" placeholder="Modules"></div><div><div class="hint" style="margin:0 0 4px">Middle shelves</div><input id="mN" type="number" inputmode="numeric" min="1" max="30" placeholder="Modules"></div><div><div class="hint" style="margin:0 0 4px">Top shelf</div><input id="tN" type="number" inputmode="numeric" min="1" max="30" placeholder="Modules"></div></div>
+    <button class="btn wide" id="applyBMT">Apply bottom, middle and top</button>
     ${others.length ? `<h3>Copy layout from another string</h3><select id="copyFrom"><option value="">Choose a string\u2026</option>${others.map(o => `<option value="${o.id}">String ${esc(o.name)} (${o.shelves.join(' / ')})</option>`).join('')}</select>` : ''}
   </section>
   <section class="card"><h3 style="margin-top:0">Preview</h3>${rackPreview(d.shelves, null, null, false)}</section>
@@ -461,6 +471,11 @@ function renderLayout() {
     const n = parseInt($('#allN').value, 10);
     if (!(n >= 1 && n <= 30)) { toast('Enter a number from 1 to 30'); return; }
     d.shelves = d.shelves.map(() => n); renderLayout();
+  });
+  $('#applyBMT').addEventListener('click', () => {
+    const v = id => parseInt($(id).value, 10), ok = x => x >= 1 && x <= 30, n = d.shelves.length, b = v('#bN'), m = v('#mN'), t = v('#tN');
+    if (!ok(b) || (n >= 2 && !ok(t)) || (n >= 3 && !ok(m))) { toast('Enter 1 to 30 modules for the bottom' + (n >= 3 ? ', middle' : '') + (n >= 2 ? ' and top' : '') + ' shelf'); return; }
+    d.shelves = n === 1 ? [b] : [b].concat(Array(n - 2).fill(m), [t]); renderLayout();
   });
   const cf = $('#copyFrom'); if (cf) cf.addEventListener('change', () => { const o = strById(cf.value); if (o) { d.shelves = o.shelves.slice(); renderLayout(); } });
   $('#saveLayout').addEventListener('click', saveLayout);
@@ -795,7 +810,8 @@ function handleRead(r) {
 
 /* ================= ROOM ================= */
 let roomDraft = null;
-const defLayout = () => Array(S.room.def.shelves).fill(S.room.def.mods);
+const defLayout = () => { const d = S.room.def, n = d.shelves; return n === 1 ? [d.bottom] : [d.bottom].concat(Array(n - 2).fill(d.mid), [d.top]); };
+const defText = () => defLayout().join(' / ');
 function roomToText() {
   const R = S.room;
   if (!Object.values(R.cells).some(id => strById(id))) return '';
@@ -878,11 +894,13 @@ function renderRoom() {
       <button data-k="/" class="sub">/</button><button data-k="abc" class="wide2 sub" id="kpAbc">ABC keyboard</button><button data-k="clear" class="sub">Clear</button>
     </div>
     <p class="hint" style="margin-top:8px"><b>Next place</b> = space between strings. <b>New row</b> = next line. <b>Empty</b> = no string in that place. Use <b>ABC keyboard</b> for names with letters.</p>
-    <div class="row" style="margin-top:10px;align-items:flex-start">
+    <div class="dgrid">
       <div><div class="hint" style="margin:0 0 4px">Shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer shelves">\u2212</button><output id="dsV">${R.def.shelves}</output><button id="dsP" aria-label="More shelves">+</button></div></div>
-      <div><div class="hint" style="margin:0 0 4px">Modules per shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules">\u2212</button><output id="dmV">${R.def.mods}</output><button id="dmP" aria-label="More modules">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Modules on bottom shelf</div><div class="stepper compact"><button id="dbM" aria-label="Fewer modules, bottom shelf">\u2212</button><output id="dbV">${R.def.bottom}</output><button id="dbP" aria-label="More modules, bottom shelf">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Modules on middle shelves</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules, middle shelves">\u2212</button><output id="dmV">${R.def.mid}</output><button id="dmP" aria-label="More modules, middle shelves">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Modules on top shelf</div><div class="stepper compact"><button id="dtM" aria-label="Fewer modules, top shelf">\u2212</button><output id="dtV">${R.def.top}</output><button id="dtP" aria-label="More modules, top shelf">+</button></div></div>
     </div>
-    <p class="hint" style="margin-top:10px">New strings get this layout. For another layout, add it to the name: <b>7:3x8</b> means 3 shelves of 8 modules, <b>7:6/6/5</b> means shelves of 6, 6 and 5 (bottom to top).</p>
+    <p class="hint" style="margin-top:10px">New strings get: <b id="defTxt">${esc(defText())}</b> modules (bottom to top). For a different layout, add it to the string number: <b>7:3x8</b> means 3 shelves of 8 modules, <b>7:5/6/6/4</b> means shelves of 5, 6, 6 and 4 (bottom to top).</p>
     <div id="r_err" class="hint bad" role="alert"></div>
     <button class="btn primary wide" id="r_apply">${hasMap ? 'Update strings and map' : 'Create strings and map'}</button>
   </section>`;
@@ -913,11 +931,11 @@ function renderRoom() {
       roomDraft = ta.value; $('#r_err').textContent = '';
     });
   });
-  const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; save(false); } };
-  $('#dsM').addEventListener('click', () => step('shelves', -1, 1, 20, '#dsV'));
-  $('#dsP').addEventListener('click', () => step('shelves', 1, 1, 20, '#dsV'));
-  $('#dmM').addEventListener('click', () => step('mods', -1, 1, 30, '#dmV'));
-  $('#dmP').addEventListener('click', () => step('mods', 1, 1, 30, '#dmV'));
+  const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; $('#defTxt').textContent = defText(); save(false); } };
+  [['ds', 'shelves', 1, 20], ['db', 'bottom', 1, 30], ['dm', 'mid', 1, 30], ['dt', 'top', 1, 30]].forEach(([id, k, lo, hi]) => {
+    $('#' + id + 'M').addEventListener('click', () => step(k, -1, lo, hi, '#' + id + 'V'));
+    $('#' + id + 'P').addEventListener('click', () => step(k, 1, lo, hi, '#' + id + 'V'));
+  });
   $('#r_apply').addEventListener('click', () => {
     const res = applyRoomText(ta.value);
     if (res.errors.length) { $('#r_err').innerHTML = res.errors.map(esc).join('<br>'); return; }
@@ -1050,71 +1068,130 @@ function sheetXml(rows, o) {
       return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xe(v)}</t></is></c>`;
     }).join('') + '</row>';
   }).join('');
-  const ncol = Math.max(...rows.map(r => r.length));
-  const view = o.freeze ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '<sheetViews><sheetView workbookViewId="0"/></sheetViews>';
+  const ncol = Math.max(1, ...rows.map(r => r.length));
+  const sel = o.selected ? ' tabSelected="1"' : '';
+  const view = o.freeze ? `<sheetViews><sheetView${sel} workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>` : `<sheetViews><sheetView${sel} workbookViewId="0"/></sheetViews>`;
+  const links = o.links && o.links.length ? '<hyperlinks>' + o.links.map(l => `<hyperlink ref="${l.ref}" location="${xe(l.loc)}" display="${xe(l.tip || '')}" tooltip="${xe(l.tip || '')}"/>`).join('') + '</hyperlinks>' : '';
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    `<dimension ref="A1:${colL(ncol - 1)}${rows.length}"/>` + view + '<sheetFormatPr defaultRowHeight="15"/>' + cols + `<sheetData>${rx}</sheetData>` +
-    (o.filter ? `<autoFilter ref="A1:${colL(ncol - 1)}${rows.length}"/>` : '') + '<pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>';
+    `<dimension ref="A1:${colL(ncol - 1)}${Math.max(1, rows.length)}"/>` + view + '<sheetFormatPr defaultRowHeight="15"/>' + cols + `<sheetData>${rx}</sheetData>` +
+    (o.filter ? `<autoFilter ref="A1:${colL(ncol - 1)}${rows.length}"/>` : '') + links + '<pageMargins left="0.5" right="0.5" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>';
+}
+function sheetNameFor(name, used) {
+  const base = ('String ' + name).replace(/[\[\]:*?\/\\']/g, '-').trim().slice(0, 31) || 'String';
+  let n = base, i = 2;
+  while (used.has(n.toLowerCase())) { const suf = ' (' + i++ + ')'; n = base.slice(0, 31 - suf.length) + suf; }
+  used.add(n.toLowerCase()); return n;
+}
+const sheetLoc = (sheet, cell) => "'" + sheet.replace(/'/g, "''") + "'!" + cell;
+// one sheet per string: the rack as it stands, top shelf first, modules left to right
+function stringSheet(st) {
+  const N = Math.max(...st.shelves), k = counts(st), rc = cellOf(st.id);
+  const rows = [[{ v: 'String ' + st.name, s: 7 }], [{ v: rc ? 'Room: row ' + rc.r + ', column ' + rc.c : 'Not placed in the room', s: 0 }], [{ v: '\u2190 Back to Room', s: 20 }], [],
+    [{ v: 'Shelf', s: 1 }].concat(Array.from({ length: N }, (_, i) => ({ v: 'Module ' + (i + 1), s: 1 })))];
+  const hts = {}; hts[4] = 20;
+  for (let sh = st.shelves.length; sh >= 1; sh--) {
+    const row = [{ v: 'Shelf ' + sh + (sh === st.shelves.length && sh > 1 ? ' (top)' : '') + (sh === 1 ? ' (bottom)' : ''), s: 1 }];
+    for (let m = 1; m <= N; m++) {
+      if (m > st.shelves[sh - 1]) { row.push(null); continue; }
+      const v = st.slots[key(sh, m)];
+      if (!v) row.push({ v: 'EMPTY', s: 18 });
+      else if (v.status === 'missing') row.push({ v: 'MISSING', s: 19 });
+      else row.push({ v: v.serial + (v.model ? '\n' + v.model : ''), s: v.flag ? 17 : 16 });
+    }
+    hts[rows.length] = 40; rows.push(row);
+  }
+  rows.push([]);
+  rows.push([{ v: 'Legend', s: 7 }, { v: 'OK', s: 16 }, { v: 'Missing', s: 19 }, { v: 'Empty', s: 18 }, { v: 'Check serial', s: 17 }]);
+  rows.push([{ v: k.ok + ' OK \u00b7 ' + k.missing + ' missing \u00b7 ' + k.empty + ' empty. Shelf 1 is the bottom shelf. Modules are numbered left to right.', s: 0 }]);
+  return { rows, opts: { widths: [20].concat(Array(N).fill(23)), heights: hts } };
 }
 function xlsxBlob() {
-  const j = S.job, T = tableData();
+  const j = S.job, T = tableData(), R = S.room, sts = sortedStrings();
+  const used = new Set(['modules', 'summary', 'room']), nameOf = {};
+  sts.forEach(st => { nameOf[st.id] = sheetNameFor(st.name, used); });
   const stat = v => v === 'OK' ? 3 : v === 'EMPTY' ? 5 : v === 'MISSING' ? 6 : 2;
   // Sheet 1: Modules
   const num = new Set([4, 5, 6, 7]);
-  const s1 = [T.H.map(h => ({ v: h, s: 1 }))].concat(T.rows.map(r => r.map((c, i) => ({ v: i === 4 || i === 5 ? (c === '' ? '' : c) : c, s: i === 11 ? stat(c) : i === 12 && c ? 4 : (num.has(i) ? 8 : 2) }))));
+  const s1 = [T.H.map(h => ({ v: h, s: 1 }))].concat(T.rows.map(r => r.map((c, i) => ({ v: c, s: i === 11 ? stat(c) : i === 12 && c ? 4 : (num.has(i) ? 8 : 2) }))));
   const w1 = [16, 10, 12, 8, 11, 11, 8, 9, 14, 22, 16, 10, 10, 22, 9, 15, 16, 14, 24];
-  // Sheet 2: Summary
-  const sum = [[{ v: 'Module scan summary', s: 7 }], [], [{ v: 'Vessel', s: 7 }, j.vessel], [{ v: 'Project', s: 7 }, j.project], [{ v: 'System / BMS', s: 7 }, j.system], [{ v: 'Engineer', s: 7 }, j.engineer], [{ v: 'Company', s: 7 }, j.company], [{ v: 'Exported', s: 7 }, localDate() + ' ' + pad2(new Date().getHours()) + ':' + pad2(new Date().getMinutes())], [{ v: 'Room drawn as seen from', s: 7 }, S.room.viewFrom], [],
-    ['String', 'Room row', 'Room column', 'Shelves', 'Modules per shelf (bottom to top)', 'OK', 'Missing', 'Empty'].map(h => ({ v: h, s: 1 }))];
-  let tOk = 0, tMi = 0, tEm = 0;
-  sortedStrings().forEach(st => { const c = counts(st), rc = cellOf(st.id); tOk += c.ok; tMi += c.missing; tEm += c.empty;
-    sum.push([{ v: st.name, s: 2 }, { v: rc ? rc.r : '', s: 8 }, { v: rc ? rc.c : '', s: 8 }, { v: st.shelves.length, s: 8 }, { v: st.shelves.join(' / '), s: 2 }, { v: c.ok, s: c.ok ? 3 : 8 }, { v: c.missing, s: c.missing ? 6 : 8 }, { v: c.empty, s: c.empty ? 5 : 8 }]); });
+  // Sheet 2: Summary (string names are links)
+  const sum = [[{ v: 'Module scan summary', s: 7 }], [], [{ v: 'Vessel', s: 7 }, j.vessel], [{ v: 'Project', s: 7 }, j.project], [{ v: 'System / BMS', s: 7 }, j.system], [{ v: 'Engineer', s: 7 }, j.engineer], [{ v: 'Company', s: 7 }, j.company], [{ v: 'Exported', s: 7 }, localDate() + ' ' + pad2(new Date().getHours()) + ':' + pad2(new Date().getMinutes())], [{ v: 'Room drawn as seen from', s: 7 }, R.viewFrom], [],
+    ['String (click to open)', 'Room row', 'Room column', 'Shelves', 'Modules per shelf (bottom to top)', 'OK', 'Missing', 'Empty'].map(h => ({ v: h, s: 1 }))];
+  const sumLinks = []; let tOk = 0, tMi = 0, tEm = 0;
+  sts.forEach(st => { const c = counts(st), rc = cellOf(st.id); tOk += c.ok; tMi += c.missing; tEm += c.empty;
+    sumLinks.push({ ref: 'A' + (sum.length + 1), loc: sheetLoc(nameOf[st.id], 'A1'), tip: 'Open String ' + st.name });
+    sum.push([{ v: 'String ' + st.name, s: 21 }, { v: rc ? rc.r : '', s: 8 }, { v: rc ? rc.c : '', s: 8 }, { v: st.shelves.length, s: 8 }, { v: st.shelves.join(' / '), s: 2 }, { v: c.ok, s: c.ok ? 3 : 8 }, { v: c.missing, s: c.missing ? 6 : 8 }, { v: c.empty, s: c.empty ? 5 : 8 }]); });
   sum.push([{ v: 'Total', s: 7 }, null, null, null, null, { v: tOk, s: 8 }, { v: tMi, s: 8 }, { v: tEm, s: 8 }]);
-  // Sheet 3: Room
-  const R = S.room, room = [[{ v: '', s: 1 }].concat(Array.from({ length: R.cols }, (_, i) => ({ v: 'Column ' + (i + 1), s: 1 })))], hts = [20];
+  // Sheet 3: Room (string cells are links to the string sheets)
+  const room = [[{ v: '', s: 1 }].concat(Array.from({ length: R.cols }, (_, i) => ({ v: 'Column ' + (i + 1), s: 1 })))], hts = { 0: 20 }, roomLinks = [];
+  const placed = new Set();
   for (let r = 1; r <= R.rows; r++) {
     const row = [{ v: 'Row ' + r, s: 1 }];
     for (let c = 1; c <= R.cols; c++) {
       const st = strById(R.cells[key(r, c)]);
       if (!st) { row.push({ v: '', s: 9 }); continue; }
+      placed.add(st.id);
       const k = counts(st), done = k.ok + k.missing;
-      row.push({ v: 'String ' + st.name + '\n' + done + ' / ' + k.total, s: k.empty === 0 ? 10 : done ? 11 : 12 });
+      row.push({ v: 'String ' + st.name + ' (' + done + '/' + k.total + ')', s: k.empty === 0 ? 13 : done ? 14 : 15 });
+      roomLinks.push({ ref: colL(c) + (r + 1), loc: sheetLoc(nameOf[st.id], 'A1'), tip: 'Open String ' + st.name });
     }
-    room.push(row); hts.push(42);
+    hts[room.length] = 40; room.push(row);
   }
-  room.push([]); room.push([{ v: 'Row 1 is the top of the map, column 1 is the left.' + (R.viewFrom ? ' Seen from: ' + R.viewFrom : ''), s: 0 }]); hts.push(0, 0);
+  room.push([]);
+  room.push([{ v: 'Row 1 is the top of the map, column 1 is the left.' + (R.viewFrom ? ' Seen from: ' + R.viewFrom : '') + ' Click a string to see each module in its position.', s: 0 }]);
+  const unplaced = sts.filter(s => !placed.has(s.id));
+  if (unplaced.length) {
+    room.push([]); room.push([{ v: 'Not placed in the room:', s: 7 }]);
+    unplaced.forEach(st => { roomLinks.push({ ref: 'B' + (room.length + 1), loc: sheetLoc(nameOf[st.id], 'A1'), tip: 'Open String ' + st.name }); room.push([null, { v: 'String ' + st.name, s: 20 }]); });
+  }
+  const sheets = [
+    { name: 'Modules', xml: sheetXml(s1, { widths: w1, freeze: true, filter: true }) },
+    { name: 'Summary', xml: sheetXml(sum, { widths: [24, 10, 12, 9, 34, 8, 9, 8], links: sumLinks }) },
+    { name: 'Room', xml: sheetXml(room, { widths: [10].concat(Array(R.cols).fill(18)), heights: hts, links: roomLinks, selected: true }) }
+  ];
+  sts.forEach(st => { const ss = stringSheet(st); ss.opts.links = [{ ref: 'A3', loc: sheetLoc('Room', 'A1'), tip: 'Back to Room' }]; sheets.push({ name: nameOf[st.id], xml: sheetXml(ss.rows, ss.opts) }); });
+  const fills = ['FF0F2433', 'FFDCEFE4', 'FFFBE9CF', 'FFF8DCD9', 'FFE4E9ED'];
+  const C = 'applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>';
+  const xf = (font, fill, border, extra) => `<xf numFmtId="0" fontId="${font}" fillId="${fill}" borderId="${border}" xfId="0" applyFont="1" applyFill="1" ${extra}`;
   const styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
-    '<fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font></fonts>' +
-    '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' +
-    ['FF0F2433', 'FFDCEFE4', 'FFFBE9CF', 'FFF8DCD9', 'FFE4E9ED'].map(c => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`).join('') + '</fills>' +
+    '<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><u/><sz val="11"/><color rgb="FF0563C1"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="7"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>' + fills.map(c => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`).join('') + '</fills>' +
     '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left style="thin"><color rgb="FFC5CFD6"/></left><right style="thin"><color rgb="FFC5CFD6"/></right><top style="thin"><color rgb="FFC5CFD6"/></top><bottom style="thin"><color rgb="FFC5CFD6"/></bottom><diagonal/></border></borders>' +
     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
-    '<cellXfs count="13">' +
-    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
-    '<xf numFmtId="0" fontId="2" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
-    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>' +
-    '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +
-    '<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +
-    '<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +
-    '<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +
-    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
-    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>' +
-    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
-    '<xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
-    '<xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
-    '<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' +
+    '<cellXfs count="22">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +                                   // 0 plain
+    xf(2, 2, 1, C) +                                                                                      // 1 header
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"/>' +                    // 2 text + border
+    '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +      // 3 green
+    '<xf numFmtId="0" fontId="0" fillId="4" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +      // 4 amber
+    '<xf numFmtId="0" fontId="0" fillId="5" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +      // 5 red
+    '<xf numFmtId="0" fontId="0" fillId="6" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>' +      // 6 grey
+    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +                      // 7 bold
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center"/></xf>' + // 8 number
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>' + // 9 empty room cell
+    xf(1, 3, 1, C) + xf(1, 4, 1, C) + xf(0, 6, 1, C) +                                                    // 10-12 (not used now)
+    xf(3, 3, 1, C) + xf(3, 4, 1, C) + xf(3, 6, 1, C) +                                                    // 13-15 room links: green, amber, grey
+    xf(0, 3, 1, C) + xf(0, 4, 1, C) + xf(0, 5, 1, C) + xf(0, 6, 1, C) +                                   // 16-19 module cells: ok, check, empty, missing
+    '<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +                      // 20 link
+    '<xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/>' +      // 21 link with border
     '</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
-  const n = T.rows.length + 1, ncol = T.H.length;
+  const nRows = T.rows.length + 1, ncol = T.H.length;
+  const ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+    sheets.map((s, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('') +
+    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>';
+  const wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="2" firstSheet="0"/></bookViews><sheets>' +
+    sheets.map((s, i) => `<sheet name="${xe(s.name)}" sheetId="${i + 1}" r:id="rId${i < 3 ? i + 1 : i + 2}"/>`).join('') + '</sheets>' +
+    `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Modules!$A$1:$${colL(ncol - 1)}$${nRows}</definedName></definedNames></workbook>`;
+  const rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    sheets.map((s, i) => `<Relationship Id="rId${i < 3 ? i + 1 : i + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('') +
+    '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>';
   const files = [
-    { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '[Content_Types].xml', text: ct },
     { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
-    { name: 'xl/workbook.xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView/></bookViews><sheets><sheet name="Modules" sheetId="1" r:id="rId1"/><sheet name="Summary" sheetId="2" r:id="rId2"/><sheet name="Room" sheetId="3" r:id="rId3"/></sheets>' + `<definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">Modules!$A$1:$${colL(ncol - 1)}$${n}</definedName></definedNames></workbook>` },
-    { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
-    { name: 'xl/styles.xml', text: styles },
-    { name: 'xl/worksheets/sheet1.xml', text: sheetXml(s1, { widths: w1, freeze: true, filter: true }) },
-    { name: 'xl/worksheets/sheet2.xml', text: sheetXml(sum, { widths: [22, 10, 12, 9, 34, 8, 9, 8] }) },
-    { name: 'xl/worksheets/sheet3.xml', text: sheetXml(room, { widths: [10].concat(Array(R.cols).fill(16)), heights: hts }) }
-  ];
+    { name: 'xl/workbook.xml', text: wb },
+    { name: 'xl/_rels/workbook.xml.rels', text: rels },
+    { name: 'xl/styles.xml', text: styles }
+  ].concat(sheets.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, text: s.xml })));
   return zipStore(files, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
