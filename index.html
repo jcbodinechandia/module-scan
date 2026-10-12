@@ -149,17 +149,13 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 .ex{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;background:var(--surface2);border-radius:10px;padding:8px 12px;margin:6px 0 10px;font-size:.88rem;align-items:center}
 .ex span{font-family:var(--mono);font-weight:700;font-size:1rem}
 .ex i{color:var(--ink2);font-style:normal}
-.kp{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:10px}
-.kp .s2{grid-column:span 2}.kp .s3{grid-column:span 3}.kp .s6{grid-column:span 6}
-.prev{font-size:.88rem;color:var(--ink2);background:var(--surface2);border-radius:10px;padding:8px 12px;margin:8px 0;min-height:0}
-.prev:empty{display:none}
+.kp{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .kp button{min-height:54px;font-size:1.25rem;font-weight:700;border-radius:10px;border:1px solid var(--line);background:var(--surface2);padding:0 4px}
 .kp button.act{background:var(--accent);color:var(--accent-ink);font-size:.95rem}
-.kp button.sub{font-size:1rem;font-weight:600}
 .kp button.emp{font-size:1.05rem}
-.kp button.big{min-height:64px;font-size:1.2rem}
-.kp button.sub2{background:var(--surface2);border-color:var(--accent);color:var(--accent);font-size:1.05rem;min-height:54px}
+.kp button.big{grid-column:span 3;min-height:64px;font-size:1.2rem}
 .kp button.next{background:var(--accent);color:var(--accent-ink)}
+.kp button.newrow{background:var(--surface2);border-color:var(--accent);color:var(--accent)}
 
 .stepper.compact button{width:44px}
 .stepper.compact output{min-width:34px}
@@ -186,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.6.2';
+const APP_VERSION = '1.6.3';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -826,7 +822,7 @@ function roomToText() {
   const R = S.room;
   if (!Object.values(R.cells).some(id => strById(id))) return '';
   const lines = [];
-  for (let r = 1; r <= R.rows; r++) { const row = []; for (let c = 1; c <= R.cols; c++) { const st = strById(R.cells[key(r, c)]); row.push(st ? st.name : '.'); } lines.push(row.join(' ')); }
+  for (let r = 1; r <= R.rows; r++) { const row = []; for (let c = 1; c <= R.cols; c++) { const st = strById(R.cells[key(r, c)]); row.push(st ? st.name : '-'); } lines.push(row.join(' ')); }
   return lines.join('\n');
 }
 function parseLayout(spec) {
@@ -895,18 +891,17 @@ function renderRoom() {
   const qsInner = `
     <h2>Which strings are in the room?</h2>
     <p class="hint">Enter the <b>string ID</b> of each string, as they stand in the room seen from the door. One line for each row of strings.</p>
-    <div class="ex"><span>7 3 12</span><i>row 1: strings 7, 3 and 12</i><span>1 . 5</span><i>row 2: string 1, an empty place (dot), string 5</i><span>14-25</span><i>an ID can contain a dash</i></div>
-    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 . 5" inputmode="none" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="String IDs in the room"></textarea>
-    <div id="r_prev" class="prev" aria-live="polite"></div>
+    <div class="ex"><span>7 3 12</span><i>row 1: strings 7, 3 and 12</i><span>1 - 5</span><i>row 2: string 1, an empty place, string 5</i></div>
+    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" inputmode="none" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="String IDs in the room"></textarea>
     <div class="kp" id="kp">
-      <button data-k="1" class="s2">1</button><button data-k="2" class="s2">2</button><button data-k="3" class="s2">3</button>
-      <button data-k="4" class="s2">4</button><button data-k="5" class="s2">5</button><button data-k="6" class="s2">6</button>
-      <button data-k="7" class="s2">7</button><button data-k="8" class="s2">8</button><button data-k="9" class="s2">9</button>
-      <button data-k="back" class="s2 act" aria-label="Delete">\u232b</button><button data-k="0" class="s2">0</button><button data-k="-" class="s2" aria-label="Dash">-</button>
-      <button data-k=" " class="s6 big next">Next place</button>
-      <button data-k="." class="s3 big sub2">Empty place</button><button data-k="NEWROW" class="s3 big sub2">New row</button>
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="back" class="act" aria-label="Delete">\u232b</button><button data-k="0">0</button><button data-k="-" class="emp" aria-label="Empty place">Empty</button>
+      <button data-k=" " class="big next">Next place</button>
+      <button data-k="NEWROW" class="big newrow">New row</button>
     </div>
-    <p class="hint" style="margin-top:8px"><b>Next place</b> = the next string in the row. <b>Empty place</b> = no string there (shown as a dot). <b>New row</b> = a new line. <b>-</b> = a dash inside an ID, like 14-25. <button class="link" id="kpClear">Clear all</button></p>
+    <p class="hint" style="margin-top:8px"><b>Next place</b> = go to the next string in the row. <b>New row</b> = start a new line. <b>Empty</b> = no string in that place (inside an ID, like 14-25, it is a dash). <button class="link" id="kpClear">Clear all</button></p>
     <div class="dgrid">
       <div><div class="hint" style="margin:0 0 4px">Middle shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer middle shelves">\u2212</button><output id="dsV">${R.def.midShelves}</output><button id="dsP" aria-label="More middle shelves">+</button></div></div>
       <div><div class="hint" style="margin:0 0 4px">Modules per middle shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules, middle shelves">\u2212</button><output id="dmV">${R.def.mid}</output><button id="dmP" aria-label="More modules, middle shelves">+</button></div></div>
@@ -930,24 +925,17 @@ function renderRoom() {
     : '<section class="card">' + qsInner + '</section>';
   const ta = $('#r_text'); ta.value = roomDraft != null ? roomDraft : roomToText();
   ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
-  const preview = () => {
-    const lines = ta.value.replace(/\r/g, '').split('\n').map(l => l.trim());
-    while (lines.length && !lines[lines.length - 1]) lines.pop();
-    const out = lines.map((ln, i) => 'Row ' + (i + 1) + ': ' + (ln.split(/[\s,;]+/).filter(Boolean).map(t => /^[-._]$/.test(t) ? '(empty)' : t.split(':')[0]).join(' \u00b7 ') || '(nothing)'));
-    $('#r_prev').innerHTML = out.length ? '<b>Reads as</b><br>' + out.map(esc).join('<br>') : '';
-  };
-  ta.addEventListener('input', preview);
   const typeKey = k => {
     ta.focus();
     if (k === 'back') { const s = ta.selectionStart, e2 = ta.selectionEnd; if (s !== e2) ta.setRangeText('', s, e2, 'end'); else if (s > 0) ta.setRangeText('', s - 1, s, 'end'); }
     else ta.setRangeText(k === 'NEWROW' ? '\n' : k, ta.selectionStart, ta.selectionEnd, 'end');
-    roomDraft = ta.value; $('#r_err').textContent = ''; preview();
+    roomDraft = ta.value; $('#r_err').textContent = '';
   };
   $$('#kp button').forEach(b => {
     b.addEventListener('pointerdown', e => e.preventDefault());   // keep the cursor in the box
     b.addEventListener('click', () => typeKey(b.dataset.k));
   });
-  $('#kpClear').addEventListener('click', () => { ta.value = ''; roomDraft = ''; $('#r_err').textContent = ''; preview(); });
+  $('#kpClear').addEventListener('click', () => { ta.value = ''; roomDraft = ''; $('#r_err').textContent = ''; });
   const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; $('#defTxt').textContent = defText(); save(false); } };
   [['ds', 'midShelves', 1, 18], ['dm', 'mid', 1, 30], ['db', 'bottom', 1, 30], ['dt', 'top', 1, 30]].forEach(([id, k, lo, hi]) => {
     $('#' + id + 'M').addEventListener('click', () => step(k, -1, lo, hi, '#' + id + 'V'));
@@ -961,7 +949,6 @@ function renderRoom() {
   });
   $('#r_view').addEventListener('input', e => { R.viewFrom = e.target.value; save(); });
   $$('.rcell').forEach(b => b.addEventListener('click', () => openRoomCell(+b.dataset.r, +b.dataset.c)));
-  preview();
 }
 function openRoomCell(r, c) {
   const R = S.room, id = R.cells[key(r, c)], st = id && strById(id);

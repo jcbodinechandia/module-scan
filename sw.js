@@ -1,5 +1,5 @@
 /* Module Scan - service worker. Change VERSION whenever any file changes. */
-const VERSION = 'v1.6.2';
+const VERSION = 'v1.6.3';
 const CACHE = 'module-scan-' + VERSION;
 const FILES = [
   './', './index.html', './manifest.webmanifest',
