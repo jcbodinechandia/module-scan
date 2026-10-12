@@ -144,6 +144,14 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 .rcell.cur{outline:4px solid var(--active);outline-offset:1px}
 .rcell small{font-size:.75rem;color:var(--ink2)}
 .rcell .rn{font-size:1.35rem;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ex{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;background:var(--surface2);border-radius:10px;padding:8px 12px;margin:6px 0 10px;font-size:.88rem;align-items:center}
+.ex span{font-family:var(--mono);font-weight:700;font-size:1rem}
+.ex i{color:var(--ink2);font-style:normal}
+.kp{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.kp button{min-height:54px;font-size:1.25rem;font-weight:700;border-radius:10px;border:1px solid var(--line);background:var(--surface2);padding:0 4px}
+.kp button.act{background:var(--accent);color:var(--accent-ink);font-size:.95rem}
+.kp button.sub{font-size:1rem;font-weight:600}
+.kp .wide2{grid-column:span 2}
 .stepper.compact button{width:44px}
 .stepper.compact output{min-width:34px}
 .rcell .pb{position:absolute;left:0;bottom:0;height:5px;background:var(--ok)}
@@ -167,8 +175,9 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 'use strict';
 
 /* ================= constants and helpers ================= */
-const KEY = 'modulescan.v1';
-const APP_VERSION = '1.3.0';
+const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
+const KEY2 = 'modulescan.v2';
+const APP_VERSION = '1.4.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -184,20 +193,26 @@ const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + 
 function blank() {
   return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
            strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null,
-           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, mods: 6 } }, prefs: { res: 'high', engine: 'auto' } };
+           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, mods: 6 } } };
 }
-function load() {
+function norm(o) { const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, (o.room && o.room.def) || {}) }) }); }
+function loadDB() {
+  const db = { systems: [], activeId: null, prefs: { res: 'high', engine: 'auto' } };
   try {
-    const t = localStorage.getItem(KEY);
-    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, (o.room && o.room.def) || {}) }), prefs: Object.assign(b.prefs, o.prefs || {}) }); }
+    const t = localStorage.getItem(KEY2);
+    if (t) { const o = JSON.parse(t); if (o && Array.isArray(o.systems)) { db.systems = o.systems.map(s => Object.assign(norm(s), { id: s.id || uid() })); db.prefs = Object.assign(db.prefs, o.prefs || {}); return db; } }
+    const t1 = localStorage.getItem(KEY);
+    if (t1) { const o = JSON.parse(t1), s = norm(o); s.id = uid(); if (o.prefs) db.prefs = Object.assign(db.prefs, o.prefs); if (s.strings.length || s.job.vessel || s.job.system) db.systems.push(s); }
   } catch (e) {}
-  return blank();
+  return db;
 }
-let S = load();
+let DB = loadDB();
+let S = null;   // the system that is open
+function activate(id) { const s = DB.systems.find(x => x.id === id); if (!s) return false; S = s; S.prefs = DB.prefs; DB.activeId = id; return true; }
 let saveWarned = false;
 function save(touch = true) {
-  if (touch) S.changedAt = new Date().toISOString();
-  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  if (S && touch) S.changedAt = new Date().toISOString();
+  try { localStorage.setItem(KEY2, JSON.stringify(DB, function (k, v) { return (k === 'prefs' && this !== DB) ? undefined : v; })); }
   catch (e) { if (!saveWarned) { saveWarned = true; alert('This phone cannot store the data (storage blocked or full). Export your files now.'); } }
 }
 try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
@@ -241,7 +256,7 @@ function posCode(st, s, m) {
 }
 
 /* ================= view plumbing ================= */
-let view = 'home';
+let view = 'systems';
 let draft = null;
 function setBar(title, back, actions) {
   $('#title').textContent = title;
@@ -254,15 +269,18 @@ function go(v, o = {}) {
   if (o.replace) history.replaceState({ v }, ''); else history.pushState({ v }, '');
   render(); window.scrollTo(0, 0);
 }
-function render() { ({ home: renderHome, layout: renderLayout, scan: renderScan, export: renderExport, room: renderRoom })[view](); }
-history.replaceState({ v: 'home' }, '');
+function render() { ({ systems: renderSystems, home: renderHome, layout: renderLayout, scan: renderScan, export: renderExport, room: renderRoom })[view](); }
+history.replaceState({ v: 'systems' }, '');
 window.addEventListener('popstate', e => {
-  const v = (e.state && e.state.v) || 'home';
+  const v = (e.state && e.state.v) || 'systems';
   if (view === 'scan') stopCam();
   closeSheet();
   view = v;
-  if (v === 'layout' && !draft) view = 'home';
-  if (v === 'scan' && !cur()) view = 'home';
+  if (!S) view = 'systems';
+  else {
+    if (v === 'layout' && !draft) view = 'home';
+    if (v === 'scan' && !cur()) view = 'home';
+  }
   render(); window.scrollTo(0, 0);
 });
 $('#back').addEventListener('click', () => history.back());
@@ -278,14 +296,13 @@ $('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') cl
 
 /* ================= HOME ================= */
 function renderHome() {
-  setBar('Module Scan', false);
+  setBar(sysTitle(S), true);
   const j = S.job;
   const strs = sortedStrings();
-  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   $('#view').innerHTML = `
   <section class="card">
-    <h2>Job details</h2>
-    <p class="hint">Enter once. Saved on this phone. Needed for the export files. Date: ${localDate()}</p>
+    <h2>System details</h2>
+    <p class="hint">Saved on this phone. Needed for the export files. Date: ${localDate()}</p>
     <div class="field">
       <label for="j_vessel">Vessel</label><input id="j_vessel" data-job="vessel" value="${esc(j.vessel)}" autocomplete="off">
       <label for="j_project">Project</label><input id="j_project" data-job="project" value="${esc(j.project)}" autocomplete="off">
@@ -302,44 +319,23 @@ function renderHome() {
       return `<button class="strrow" data-open="${st.id}"><div class="top"><b>String ${esc(st.name)}</b>${chip}</div>
         <div class="hint" style="margin:2px 0 0">${st.shelves.length} shelves \u00b7 ${c.total} modules \u00b7 ${done} done${c.missing ? ' (' + c.missing + ' missing)' : ''}</div>
         <div class="bar"><i style="width:${pct}%"></i></div></button>`;
-    }).join('') : '<p class="hint">No string yet. Add a string, set its shelves and modules, then scan.</p>'}
-    <button class="btn primary wide" id="addStr">Add string</button>
-    <button class="btn wide" id="toRoom">Room layout (where each string stands)</button>
+    }).join('') : '<p class="hint">No string yet. Use Room layout to type all strings at once, or add one string.</p>'}
+    <button class="btn primary wide" id="toRoom">Room layout: add all strings at once</button>
+    <button class="btn wide" id="addStr">Add one string</button>
   </section>
   <section class="card">
     <button class="btn wide" id="toExport" ${strs.length ? '' : 'disabled'}>Review and export</button>
-    <button class="btn danger wide" id="newJob" ${strs.length || j.vessel ? '' : 'disabled'}>Start new job</button>
-  </section>
-  <details class="card"><summary>Scanner settings</summary>
-    <div class="field"><label for="p_res">Camera quality</label>
-      <select id="p_res"><option value="high" ${S.prefs.res !== 'normal' ? 'selected' : ''}>High (up to 4K): scans from further away</option><option value="normal" ${S.prefs.res === 'normal' ? 'selected' : ''}>Normal (1080p): faster on older phones</option></select>
-      <label for="p_eng">Reader</label>
-      <select id="p_eng"><option value="auto" ${S.prefs.engine !== 'zxing' ? 'selected' : ''}>Automatic (phone reader if available)</option><option value="zxing" ${S.prefs.engine === 'zxing' ? 'selected' : ''}>ZXing only</option></select></div>
-    <p class="hint">Changes apply the next time the camera starts.</p></details>
-  ${standalone ? '' : `<details class="card"><summary>Install for offline use</summary>
-    <p class="hint"><b>iPhone (Safari):</b> tap Share, then Add to Home Screen.<br><b>Android (Chrome):</b> tap the menu, then Install app or Add to Home screen.<br>Open the app once with internet first. After that it works offline.</p></details>`}
-  <div class="foot" id="offstat"></div>
-  <div class="foot" id="updstat"></div>
-  <div class="foot">Version ${APP_VERSION}. Data stays on this phone until you export it.</div>`;
-  $$('[data-job]').forEach(i => i.addEventListener('input', () => { S.job[i.dataset.job] = i.value; i.classList.remove('err'); save(); }));
+    <button class="btn danger wide" id="delSys">Delete this system</button>
+  </section>`;
+  $$('[data-job]').forEach(i => i.addEventListener('input', () => { S.job[i.dataset.job] = i.value; i.classList.remove('err'); $('#title').textContent = sysTitle(S); save(); }));
   $$('[data-open]').forEach(b => b.addEventListener('click', () => { S.cur = b.dataset.open; const st = cur(); const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); }));
   $('#addStr').addEventListener('click', addString);
   $('#toRoom').addEventListener('click', () => go('room'));
-  $('#p_res').addEventListener('change', e => { S.prefs.res = e.target.value; save(false); });
-  $('#p_eng').addEventListener('change', e => { S.prefs.engine = e.target.value; save(false); });
   $('#toExport').addEventListener('click', () => go('export'));
-  $('#newJob').addEventListener('click', newJob);
-  offlineStatus(); updateStatus();
+  $('#delSys').addEventListener('click', deleteSystem);
 }
 function missingJob() { return [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim()); }
 function addString() { startLayout(null); }
-function newJob() {
-  const unsaved = !S.exportedAt || (S.changedAt && S.changedAt > S.exportedAt);
-  const msg = (unsaved ? 'You have NOT exported the latest data.\n\n' : '') + 'Start a new job? All strings and scans on this phone will be deleted.';
-  if (!confirm(msg)) return;
-  const j = S.job; const keep = { engineer: j.engineer, company: j.company, sep: j.sep };
-  S = blank(); Object.assign(S.job, keep); save(false); render();
-}
 async function offlineStatus() {
   const el = $('#offstat'); if (!el) return;
   let ready = false;
@@ -352,6 +348,59 @@ function updateStatus() {
   const el = $('#updstat'); if (!el) return;
   el.innerHTML = waitingWorker ? '<button class="btn small" id="doUpd">Update available. Tap to reload</button>' : '';
   const b = $('#doUpd'); if (b) b.addEventListener('click', () => { navigator.serviceWorker.addEventListener('controllerchange', () => location.reload()); waitingWorker.postMessage('skip'); });
+}
+
+/* ================= SYSTEMS (start screen) ================= */
+const sysTitle = s => { const a = [s.job.vessel, s.job.system].filter(x => x && x.trim()); return a.length ? a.join(' \u00b7 ') : 'New system'; };
+function sysStats(s) { let ok = 0, mi = 0, em = 0; s.strings.forEach(st => { const c = counts(st); ok += c.ok; mi += c.missing; em += c.empty; }); return { ok, mi, em, total: ok + mi + em }; }
+function renderSystems() {
+  setBar('Module Scan', false);
+  const list = DB.systems.slice().sort((a, b) => (b.changedAt || b.job.startedAt || '').localeCompare(a.changedAt || a.job.startedAt || ''));
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('#view').innerHTML = `
+  <section class="card">
+    <h2>Systems</h2>
+    <p class="hint">Each system (BMS) has its own strings and room map. Everything is saved on this phone after every scan. You can leave a system and come back to it later.</p>
+    ${list.length ? list.map(s => {
+      const k = sysStats(s), done = k.ok + k.mi, pct = k.total ? Math.round(done / k.total * 100) : 0;
+      const chip = k.total && k.em === 0 ? '<span class="chip ok">Complete</span>' : done ? '<span class="chip warn">In progress</span>' : '<span class="chip">Not started</span>';
+      const exp = s.exportedAt && (!s.changedAt || s.changedAt <= s.exportedAt) ? ' <span class="chip ok">Exported</span>' : '';
+      return `<button class="strrow" data-sys="${s.id}"><div class="top"><b>${esc(sysTitle(s))}</b><span>${chip}${exp}</span></div>
+        <div class="hint" style="margin:2px 0 0">${s.job.project ? 'Project ' + esc(s.job.project) + ' \u00b7 ' : ''}${s.strings.length} strings \u00b7 ${done} of ${k.total} modules${s.changedAt ? ' \u00b7 ' + localTime(s.changedAt) : ''}</div>
+        <div class="bar"><i style="width:${pct}%"></i></div></button>`;
+    }).join('') : '<p class="hint">No system yet. Tap New system to start.</p>'}
+    <button class="btn primary wide" id="newSys">New system</button>
+  </section>
+  <details class="card"><summary>Scanner settings</summary>
+    <div class="field"><label for="p_res">Camera quality</label>
+      <select id="p_res"><option value="high" ${DB.prefs.res !== 'normal' ? 'selected' : ''}>High (up to 4K): scans from further away</option><option value="normal" ${DB.prefs.res === 'normal' ? 'selected' : ''}>Normal (1080p): faster on older phones</option></select>
+      <label for="p_eng">Reader</label>
+      <select id="p_eng"><option value="auto" ${DB.prefs.engine !== 'zxing' ? 'selected' : ''}>Automatic (phone reader if available)</option><option value="zxing" ${DB.prefs.engine === 'zxing' ? 'selected' : ''}>ZXing only</option></select></div>
+    <p class="hint">Changes apply the next time the camera starts.</p></details>
+  ${standalone ? '' : `<details class="card"><summary>Install for offline use</summary>
+    <p class="hint"><b>iPhone (Safari):</b> tap Share, then Add to Home Screen.<br><b>Android (Chrome):</b> tap the menu, then Install app or Add to Home screen.<br>Open the app once with internet first. After that it works offline.</p></details>`}
+  <div class="foot" id="offstat"></div>
+  <div class="foot" id="updstat"></div>
+  <div class="foot">Version ${APP_VERSION}. Export each system when you finish it. Data stays on this phone until you delete the system.</div>`;
+  $$('[data-sys]').forEach(b => b.addEventListener('click', () => { activate(b.dataset.sys); save(false); go('home'); }));
+  $('#newSys').addEventListener('click', newSystem);
+  $('#p_res').addEventListener('change', e => { DB.prefs.res = e.target.value; save(false); });
+  $('#p_eng').addEventListener('change', e => { DB.prefs.engine = e.target.value; save(false); });
+  offlineStatus(); updateStatus();
+}
+function newSystem() {
+  const last = DB.systems.slice().sort((a, b) => (b.changedAt || '').localeCompare(a.changedAt || ''))[0];
+  const s = blank(); s.id = uid();
+  if (last) { ['vessel', 'project', 'engineer', 'company', 'sep'].forEach(k => { s.job[k] = last.job[k]; }); }
+  s.job.startedAt = new Date().toISOString();
+  DB.systems.push(s); activate(s.id); save();
+  go('home');
+}
+function deleteSystem() {
+  const unsaved = !S.exportedAt || (S.changedAt && S.changedAt > S.exportedAt);
+  if (!confirm((unsaved ? 'You have NOT exported the latest data of this system.\n\n' : '') + 'Delete "' + sysTitle(S) + '" with all its strings and scans from this phone?')) return;
+  DB.systems = DB.systems.filter(x => x.id !== S.id); S = null; DB.activeId = null; save(false);
+  history.back();
 }
 
 /* ================= LAYOUT ================= */
@@ -388,7 +437,7 @@ function renderLayout() {
   }
   $('#view').innerHTML = `
   <section class="card">
-    <div class="field"><label for="l_name">String name or number (any order is fine)</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
+    <div class="field"><label for="l_name">String number (or name). Any order is fine.</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
     <p class="hint">Room position: ${d.placeAt ? 'Row ' + d.placeAt.r + ' \u00b7 Column ' + d.placeAt.c : (!d.isNew && roomText(d.id)) || 'not placed yet (use Room layout)'}</p>
     <h3>Number of shelves</h3>
     <div class="stepper"><button id="shMinus" aria-label="Fewer shelves">\u2212</button><output id="shCount">${d.shelves.length}</output><button id="shPlus" aria-label="More shelves">+</button></div>
@@ -817,9 +866,18 @@ function renderRoom() {
   const hasMap = placed.size > 0;
   const qsOpen = `
   <section class="card">
-    <h2>Quick setup</h2>
-    <p class="hint">Type the room as you see it from the door. One line per row. Put a space between strings and a dash for an empty place.</p>
-    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off"></textarea>
+    <h2>Which strings are in the room?</h2>
+    <p class="hint">Enter the <b>string number</b> of each string, as they stand in the room seen from the door. One line for each row of strings.</p>
+    <div class="ex"><span>7 3 12</span><i>row 1: strings 7, 3 and 12</i><span>1 - 5</span><i>row 2: string 1, an empty place, string 5</i></div>
+    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" inputmode="none" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Strings in the room"></textarea>
+    <div class="kp" id="kp">
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="back" class="act" aria-label="Delete">\u232b</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="\n" class="act">New row</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k=" " class="act">Next place</button>
+      <button data-k="0">0</button><button data-k="-" aria-label="Empty place">Empty</button><button data-k=":" class="sub">:</button><button data-k="x" class="sub">x</button>
+      <button data-k="/" class="sub">/</button><button data-k="abc" class="wide2 sub" id="kpAbc">ABC keyboard</button><button data-k="clear" class="sub">Clear</button>
+    </div>
+    <p class="hint" style="margin-top:8px"><b>Next place</b> = space between strings. <b>New row</b> = next line. <b>Empty</b> = no string in that place. Use <b>ABC keyboard</b> for names with letters.</p>
     <div class="row" style="margin-top:10px;align-items:flex-start">
       <div><div class="hint" style="margin:0 0 4px">Shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer shelves">\u2212</button><output id="dsV">${R.def.shelves}</output><button id="dsP" aria-label="More shelves">+</button></div></div>
       <div><div class="hint" style="margin:0 0 4px">Modules per shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules">\u2212</button><output id="dmV">${R.def.mods}</output><button id="dmP" aria-label="More modules">+</button></div></div>
@@ -839,6 +897,22 @@ function renderRoom() {
   $('#view').innerHTML = hasMap ? mapHtml + '<details class="card"><summary>Change strings and layout (type)</summary>' + qsOpen.replace('<section class="card">', '<div>').replace(/<\/section>\s*$/, '</div>') + '</details>' : qsOpen + mapHtml;
   const ta = $('#r_text'); ta.value = roomDraft != null ? roomDraft : roomToText();
   ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
+  $$('#kp button').forEach(b => {
+    b.addEventListener('pointerdown', e => e.preventDefault());   // keep the cursor in the box
+    b.addEventListener('click', () => {
+      const k = b.dataset.k;
+      if (k === 'abc') {
+        const on = ta.getAttribute('inputmode') === 'none';
+        ta.setAttribute('inputmode', on ? 'text' : 'none'); b.textContent = on ? '123 keypad' : 'ABC keyboard';
+        ta.blur(); setTimeout(() => ta.focus(), 60); return;
+      }
+      ta.focus();
+      if (k === 'clear') { ta.value = ''; }
+      else if (k === 'back') { const s = ta.selectionStart, e2 = ta.selectionEnd; if (s !== e2) ta.setRangeText('', s, e2, 'end'); else if (s > 0) ta.setRangeText('', s - 1, s, 'end'); }
+      else ta.setRangeText(k, ta.selectionStart, ta.selectionEnd, 'end');
+      roomDraft = ta.value; $('#r_err').textContent = '';
+    });
+  });
   const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; save(false); } };
   $('#dsM').addEventListener('click', () => step('shelves', -1, 1, 20, '#dsV'));
   $('#dsP').addEventListener('click', () => step('shelves', 1, 1, 20, '#dsV'));
@@ -1111,6 +1185,7 @@ function renderExport() {
 }
 
 /* ================= start ================= */
+try { if (DB.systems.length && !localStorage.getItem(KEY2)) save(false); } catch (e) {}   // finish upgrading old data
 render();
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').then(reg => {
@@ -1121,8 +1196,8 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready.then(() => offlineStatus());
   }).catch(() => {});
 }
-window.addEventListener('online', () => view === 'home' && offlineStatus());
-window.addEventListener('offline', () => view === 'home' && offlineStatus());
+window.addEventListener('online', () => view === 'systems' && offlineStatus());
+window.addEventListener('offline', () => view === 'systems' && offlineStatus());
 })();
 </script>
 </body>
