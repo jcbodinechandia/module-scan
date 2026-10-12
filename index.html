@@ -186,7 +186,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.6.1';
+const APP_VERSION = '1.6.2';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -875,8 +875,24 @@ function applyRoomText(text) {
 function renderRoom() {
   setBar('Room layout', true);
   const R = S.room, hasText = Object.values(R.cells).some(id => strById(id));
-  $('#view').innerHTML = `
-  <section class="card">
+  const placed = new Set(Object.values(R.cells).filter(id => strById(id)));
+  const unplaced = sortedStrings().filter(s => !placed.has(s.id));
+  const hasMap = placed.size > 0;
+  let g = `<div class="rwrap"><div class="rgrid" style="grid-template-columns:30px repeat(${R.cols},minmax(64px,1fr));min-width:${30 + R.cols * 70}px"><div></div>`;
+  for (let c = 1; c <= R.cols; c++) g += `<div class="rax">Col ${c}</div>`;
+  for (let r = 1; r <= R.rows; r++) {
+    g += `<div class="rax">R${r}</div>`;
+    for (let c = 1; c <= R.cols; c++) {
+      const id = R.cells[key(r, c)], st = id && strById(id);
+      if (st) {
+        const k = counts(st), done = k.ok + k.missing, pct = k.total ? Math.round(done / k.total * 100) : 0, cls = k.empty === 0 ? 'ok' : done ? 'prog' : '';
+        g += `<button class="rcell has ${cls}${S.cur === st.id ? ' cur' : ''}" data-r="${r}" data-c="${c}"><small>String</small><b class="rn">${esc(st.name)}</b><small>${done}/${k.total}</small><span class="pb" style="width:${pct}%"></span></button>`;
+      } else g += `<button class="rcell" data-r="${r}" data-c="${c}" aria-label="Empty place, row ${r}, column ${c}">+</button>`;
+    }
+  }
+  g += '</div></div>';
+  const viewField = `<div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>`;
+  const qsInner = `
     <h2>Which strings are in the room?</h2>
     <p class="hint">Enter the <b>string ID</b> of each string, as they stand in the room seen from the door. One line for each row of strings.</p>
     <div class="ex"><span>7 3 12</span><i>row 1: strings 7, 3 and 12</i><span>1 . 5</span><i>row 2: string 1, an empty place (dot), string 5</i><span>14-25</span><i>an ID can contain a dash</i></div>
@@ -900,8 +916,18 @@ function renderRoom() {
     <p class="hint" style="margin-top:10px">New strings get this layout: <b id="defTxt">${esc(defText())}</b> modules (bottom to top). You can change one string later in its own layout screen.</p>
     <div id="r_err" class="hint bad" role="alert"></div>
     <button class="btn primary wide" id="r_apply">${hasText ? 'Update strings' : 'Create strings'}</button>
-    <div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>
+    ${hasMap ? '' : viewField}`;
+  const mapHtml = `
+  <section class="card">
+    <h2>Room map</h2>
+    ${g}
+    <div class="edge">Row 1 is at the top of the map, Column 1 on the left. Tap a string to scan it.</div>
+    ${unplaced.length ? `<p class="hint" style="margin-top:10px">Not placed yet (tap a square to place):</p><div class="chips">${unplaced.map(s => `<span class="chip">String ${esc(s.name)}</span>`).join('')}</div>` : ''}
+    ${viewField}
   </section>`;
+  $('#view').innerHTML = hasMap
+    ? mapHtml + '<details class="card"><summary>Change strings and layout</summary>' + qsInner + '</details>'
+    : '<section class="card">' + qsInner + '</section>';
   const ta = $('#r_text'); ta.value = roomDraft != null ? roomDraft : roomToText();
   ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
   const preview = () => {
@@ -934,8 +960,33 @@ function renderRoom() {
     toast('Done: ' + res.placed + ' string' + (res.placed === 1 ? '' : 's') + ' in the room' + (res.created ? ', ' + res.created + ' new' : '') + (res.warn.length ? '. ' + res.warn.join(' ') : '.'), 5000);
   });
   $('#r_view').addEventListener('input', e => { R.viewFrom = e.target.value; save(); });
+  $$('.rcell').forEach(b => b.addEventListener('click', () => openRoomCell(+b.dataset.r, +b.dataset.c)));
   preview();
 }
+function openRoomCell(r, c) {
+  const R = S.room, id = R.cells[key(r, c)], st = id && strById(id);
+  if (st) {
+    openSheet(`<h3>String ${esc(st.name)}</h3><p class="hint">Row ${r} \u00b7 Column ${c}</p>
+      <button class="btn primary wide" id="rcOpen">Open and scan</button>
+      <button class="btn wide" id="rcEdit">Edit layout</button>
+      <button class="btn wide" id="rcRemove">Remove from this place</button>
+      <button class="btn wide" id="rcClose">Close</button>`);
+    $('#rcOpen').addEventListener('click', () => { closeSheet(); S.cur = st.id; const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); });
+    $('#rcEdit').addEventListener('click', () => { closeSheet(); startLayout(st); });
+    $('#rcRemove').addEventListener('click', () => { delete R.cells[key(r, c)]; save(); closeSheet(); roomDraft = null; renderRoom(); });
+  } else {
+    const placed = new Set(Object.values(R.cells).filter(x => strById(x)));
+    const unplaced = sortedStrings().filter(s => !placed.has(s.id));
+    openSheet(`<h3>Row ${r} \u00b7 Column ${c}</h3>
+      ${unplaced.map(s => `<button class="btn wide" data-place="${s.id}">Place String ${esc(s.name)} here</button>`).join('')}
+      <button class="btn primary wide" id="rcNew">New string here</button>
+      <button class="btn wide" id="rcClose">Close</button>`);
+    $$('[data-place]').forEach(b => b.addEventListener('click', () => { R.cells[key(r, c)] = b.dataset.place; save(); closeSheet(); roomDraft = null; renderRoom(); }));
+    $('#rcNew').addEventListener('click', () => { closeSheet(); startLayout(null, { r, c }); });
+  }
+  $('#rcClose').addEventListener('click', closeSheet);
+}
+
 
 /* ================= slot sheet ================= */
 function openSlot(s, m, typeFirst) {
