@@ -47,6 +47,7 @@ main{padding:12px 12px calc(env(safe-area-inset-bottom,0px) + 28px);max-width:64
 .card h3{font-size:.95rem;margin:14px 0 6px}
 .hint{color:var(--ink2);font-size:.9rem;margin:4px 0 8px}
 .field label{display:block;font-size:.85rem;color:var(--ink2);margin:10px 0 4px}
+textarea{width:100%;font:1rem/1.4 var(--mono);padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);resize:vertical;min-height:96px}
 input,select{width:100%;min-height:48px;font:inherit;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 input.err{border-color:var(--bad);background:var(--bad-bg)}
 
@@ -167,7 +168,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -183,12 +184,12 @@ const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + 
 function blank() {
   return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
            strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null,
-           room: { rows: 2, cols: 4, viewFrom: '', cells: {} }, prefs: { res: 'high', engine: 'auto' } };
+           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, mods: 6 } }, prefs: { res: 'high', engine: 'auto' } };
 }
 function load() {
   try {
     const t = localStorage.getItem(KEY);
-    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}), prefs: Object.assign(b.prefs, o.prefs || {}) }); }
+    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, (o.room && o.room.def) || {}) }), prefs: Object.assign(b.prefs, o.prefs || {}) }); }
   } catch (e) {}
   return blank();
 }
@@ -284,7 +285,7 @@ function renderHome() {
   $('#view').innerHTML = `
   <section class="card">
     <h2>Job details</h2>
-    <p class="hint">Enter once. Saved on this phone. Date: ${localDate()}</p>
+    <p class="hint">Enter once. Saved on this phone. Needed for the export files. Date: ${localDate()}</p>
     <div class="field">
       <label for="j_vessel">Vessel</label><input id="j_vessel" data-job="vessel" value="${esc(j.vessel)}" autocomplete="off">
       <label for="j_project">Project</label><input id="j_project" data-job="project" value="${esc(j.project)}" autocomplete="off">
@@ -331,16 +332,7 @@ function renderHome() {
   offlineStatus(); updateStatus();
 }
 function missingJob() { return [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim()); }
-function addString() {
-  const need = missingJob();
-  if (need.length) {
-    need.forEach(([k]) => $('#j_' + k).classList.add('err'));
-    $('#j_' + need[0][0]).focus();
-    toast('Please fill in: ' + need.map(n => n[1]).join(', '));
-    return;
-  }
-  startLayout(null);
-}
+function addString() { startLayout(null); }
 function newJob() {
   const unsaved = !S.exportedAt || (S.changedAt && S.changedAt > S.exportedAt);
   const msg = (unsaved ? 'You have NOT exported the latest data.\n\n' : '') + 'Start a new job? All strings and scans on this phone will be deleted.';
@@ -445,7 +437,9 @@ function saveLayout() {
   }
   S.cur = d.id; if (!S.job.startedAt) S.job.startedAt = new Date().toISOString();
   S.pos = firstEmpty(strById(S.cur)) || { shelf: 1, module: 1 };
-  draft = null; save(); go('scan', { replace: true });
+  const back = d.isNew && d.placeAt;
+  draft = null; save();
+  if (back) { roomDraft = null; history.back(); } else go('scan', { replace: true });
 }
 
 /* ================= SCAN ================= */
@@ -751,6 +745,57 @@ function handleRead(r) {
 }
 
 /* ================= ROOM ================= */
+let roomDraft = null;
+const defLayout = () => Array(S.room.def.shelves).fill(S.room.def.mods);
+function roomToText() {
+  const R = S.room;
+  if (!Object.values(R.cells).some(id => strById(id))) return '';
+  const lines = [];
+  for (let r = 1; r <= R.rows; r++) { const row = []; for (let c = 1; c <= R.cols; c++) { const st = strById(R.cells[key(r, c)]); row.push(st ? st.name : '-'); } lines.push(row.join(' ')); }
+  return lines.join('\n');
+}
+function parseLayout(spec) {
+  let m = /^(\d{1,2})[x\u00d7*](\d{1,2})$/i.exec(spec);
+  if (m) { const a = +m[1], b = +m[2]; return a >= 1 && a <= 20 && b >= 1 && b <= 30 ? Array(a).fill(b) : null; }
+  if (/^\d{1,2}(\/\d{1,2})+$/.test(spec)) { const arr = spec.split('/').map(Number); return arr.length <= 20 && arr.every(n => n >= 1 && n <= 30) ? arr : null; }
+  return null;
+}
+function applyRoomText(text) {
+  const lines = text.replace(/\r/g, '').split('\n').map(l => l.trim());
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  if (!lines.length) return { errors: ['Type at least one string name.'] };
+  const errors = [], seen = new Set(), grid = [];
+  if (lines.length > 10) errors.push('Maximum 10 rows.');
+  lines.forEach((ln, i) => {
+    const toks = ln.split(/[\s,;]+/).filter(Boolean);
+    if (toks.length > 12) errors.push('Line ' + (i + 1) + ': maximum 12 places per row.');
+    grid.push(toks.map(t => {
+      if (/^[-._]$/.test(t)) return null;
+      const parts = t.split(':'), name = parts[0];
+      if (!name || parts.length > 2) { errors.push('Line ' + (i + 1) + ': "' + t + '" is not valid.'); return null; }
+      let layout = null;
+      if (parts.length === 2) { layout = parseLayout(parts[1]); if (!layout) { errors.push('Line ' + (i + 1) + ': "' + parts[1] + '" is not a layout. Use 4x6 or 6/6/5.'); return null; } }
+      const k = name.toLowerCase(); if (seen.has(k)) errors.push('String ' + name + ' is used twice.'); seen.add(k);
+      return { name, layout };
+    }));
+  });
+  if (errors.length) return { errors };
+  const R = S.room, cells = {}, warn = []; let created = 0, placed = 0;
+  grid.forEach((row, ri) => row.forEach((t, ci) => {
+    if (!t) return;
+    let st = S.strings.find(s => s.name.trim().toLowerCase() === t.name.toLowerCase());
+    if (!st) { st = { id: uid(), name: t.name, shelves: (t.layout || defLayout()).slice(), slots: {} }; S.strings.push(st); created++; }
+    else if (t.layout && t.layout.join() !== st.shelves.join()) {
+      const lost = Object.keys(st.slots).some(k => { const [sh, m] = k.split('-').map(Number); return !(sh <= t.layout.length && m <= t.layout[sh - 1]); });
+      if (lost) warn.push('String ' + st.name + ': layout not changed, it has scanned modules outside the new layout.'); else st.shelves = t.layout.slice();
+    }
+    cells[key(ri + 1, ci + 1)] = st.id; placed++;
+  }));
+  R.cells = cells; R.rows = Math.max(1, grid.length); R.cols = Math.max(1, ...grid.map(r => r.length));
+  if (!S.job.startedAt) S.job.startedAt = new Date().toISOString();
+  save();
+  return { errors: [], created, placed, warn };
+}
 function renderRoom() {
   setBar('Room layout', true);
   const R = S.room;
@@ -769,31 +814,43 @@ function renderRoom() {
     }
   }
   g += '</div></div>';
-  $('#view').innerHTML = `
+  const hasMap = placed.size > 0;
+  const qsOpen = `
   <section class="card">
-    <h2>Where the strings stand</h2>
-    <p class="hint">Tap a square to place a string. Strings can be in any order and any name.</p>
-    <div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>
+    <h2>Quick setup</h2>
+    <p class="hint">Type the room as you see it from the door. One line per row. Put a space between strings and a dash for an empty place.</p>
+    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off"></textarea>
     <div class="row" style="margin-top:10px;align-items:flex-start">
-      <div><div class="hint" style="margin:0 0 4px">Rows</div><div class="stepper compact"><button id="rowM" aria-label="Fewer rows">\u2212</button><output>${R.rows}</output><button id="rowP" aria-label="More rows">+</button></div></div>
-      <div><div class="hint" style="margin:0 0 4px">Columns</div><div class="stepper compact"><button id="colM" aria-label="Fewer columns">\u2212</button><output>${R.cols}</output><button id="colP" aria-label="More columns">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer shelves">\u2212</button><output id="dsV">${R.def.shelves}</output><button id="dsP" aria-label="More shelves">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Modules per shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules">\u2212</button><output id="dmV">${R.def.mods}</output><button id="dmP" aria-label="More modules">+</button></div></div>
     </div>
-  </section>
-  <section class="card">${g}
-    <div class="edge">Row 1 is at the top of the map, Column 1 on the left</div>
-    ${unplaced.length ? `<p class="hint" style="margin-top:10px">Not placed yet:</p><div class="chips">${unplaced.map(s => `<span class="chip">String ${esc(s.name)}</span>`).join('')}</div>` : ''}
+    <p class="hint" style="margin-top:10px">New strings get this layout. For another layout, add it to the name: <b>7:3x8</b> means 3 shelves of 8 modules, <b>7:6/6/5</b> means shelves of 6, 6 and 5 (bottom to top).</p>
+    <div id="r_err" class="hint bad" role="alert"></div>
+    <button class="btn primary wide" id="r_apply">${hasMap ? 'Update strings and map' : 'Create strings and map'}</button>
   </section>`;
+  const mapHtml = `  <section class="card">
+    <h2>Map</h2>
+    ${hasMap ? '' : '<p class="hint">The map appears here after quick setup. You can also tap a square to add a string.</p>'}
+    ${g}
+    <div class="edge">Row 1 is at the top of the map, Column 1 on the left. Tap a string to scan it.</div>
+    ${unplaced.length ? `<p class="hint" style="margin-top:10px">Not placed yet (tap a square to place):</p><div class="chips">${unplaced.map(s => `<span class="chip">String ${esc(s.name)}</span>`).join('')}</div>` : ''}
+    <div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>
+  </section>`;
+  $('#view').innerHTML = hasMap ? mapHtml + '<details class="card"><summary>Change strings and layout (type)</summary>' + qsOpen.replace('<section class="card">', '<div>').replace(/<\/section>\s*$/, '</div>') + '</details>' : qsOpen + mapHtml;
+  const ta = $('#r_text'); ta.value = roomDraft != null ? roomDraft : roomToText();
+  ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
+  const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; save(false); } };
+  $('#dsM').addEventListener('click', () => step('shelves', -1, 1, 20, '#dsV'));
+  $('#dsP').addEventListener('click', () => step('shelves', 1, 1, 20, '#dsV'));
+  $('#dmM').addEventListener('click', () => step('mods', -1, 1, 30, '#dmV'));
+  $('#dmP').addEventListener('click', () => step('mods', 1, 1, 30, '#dmV'));
+  $('#r_apply').addEventListener('click', () => {
+    const res = applyRoomText(ta.value);
+    if (res.errors.length) { $('#r_err').innerHTML = res.errors.map(esc).join('<br>'); return; }
+    roomDraft = null; renderRoom();
+    toast('Done: ' + res.placed + ' places' + (res.created ? ', ' + res.created + ' new string' + (res.created > 1 ? 's' : '') : '') + (res.warn.length ? '. ' + res.warn.join(' ') : '.'), 5000);
+  });
   $('#r_view').addEventListener('input', e => { R.viewFrom = e.target.value; save(); });
-  const usedBeyond = (rows, cols) => Object.keys(R.cells).some(k => { const [r, c] = k.split('-').map(Number); return (r > rows || c > cols) && strById(R.cells[k]); });
-  const resize = (rows, cols) => {
-    if (rows < 1 || rows > 8 || cols < 1 || cols > 12) return;
-    if (usedBeyond(rows, cols)) { toast('Remove the strings from the outer squares first'); return; }
-    R.rows = rows; R.cols = cols; save(); renderRoom();
-  };
-  $('#rowM').addEventListener('click', () => resize(R.rows - 1, R.cols));
-  $('#rowP').addEventListener('click', () => resize(R.rows + 1, R.cols));
-  $('#colM').addEventListener('click', () => resize(R.rows, R.cols - 1));
-  $('#colP').addEventListener('click', () => resize(R.rows, R.cols + 1));
   $$('.rcell').forEach(b => b.addEventListener('click', () => openRoomCell(+b.dataset.r, +b.dataset.c)));
 }
 function openRoomCell(r, c) {
@@ -806,7 +863,7 @@ function openRoomCell(r, c) {
       <button class="btn wide" id="rcClose">Close</button>`);
     $('#rcOpen').addEventListener('click', () => { closeSheet(); S.cur = st.id; const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); });
     $('#rcEdit').addEventListener('click', () => { closeSheet(); startLayout(st); });
-    $('#rcRemove').addEventListener('click', () => { delete R.cells[key(r, c)]; save(); closeSheet(); renderRoom(); });
+    $('#rcRemove').addEventListener('click', () => { delete R.cells[key(r, c)]; save(); closeSheet(); roomDraft = null; renderRoom(); });
   } else {
     const placed = new Set(Object.values(R.cells).filter(x => strById(x)));
     const unplaced = sortedStrings().filter(s => !placed.has(s.id));
@@ -814,12 +871,8 @@ function openRoomCell(r, c) {
       ${unplaced.map(s => `<button class="btn wide" data-place="${s.id}">Place String ${esc(s.name)} here</button>`).join('')}
       <button class="btn primary wide" id="rcNew">New string here</button>
       <button class="btn wide" id="rcClose">Close</button>`);
-    $$('[data-place]').forEach(b => b.addEventListener('click', () => { R.cells[key(r, c)] = b.dataset.place; save(); closeSheet(); renderRoom(); }));
-    $('#rcNew').addEventListener('click', () => {
-      closeSheet();
-      if (missingJob().length) { toast('Fill in the job details on the first screen, then come back.'); return; }
-      startLayout(null, { r, c });
-    });
+    $$('[data-place]').forEach(b => b.addEventListener('click', () => { R.cells[key(r, c)] = b.dataset.place; save(); closeSheet(); roomDraft = null; renderRoom(); }));
+    $('#rcNew').addEventListener('click', () => { closeSheet(); startLayout(null, { r, c }); });
   }
   $('#rcClose').addEventListener('click', closeSheet);
 }
@@ -1017,8 +1070,9 @@ function renderExport() {
   setBar('Review and export', true);
   const sts = sortedStrings();
   const bad = sts.filter(st => counts(st).empty > 0);
-  const complete = sts.length > 0 && bad.length === 0;
+  const complete = sts.length > 0 && bad.length === 0 && missingJob().length === 0;
   const canShare = !!(navigator.canShare && window.File);
+  const needJob = missingJob();
   $('#view').innerHTML = `
   <section class="card">
     <h2>${esc(S.job.vessel || 'Vessel')} \u00b7 ${esc(S.job.system || 'System')}</h2>
@@ -1028,6 +1082,7 @@ function renderExport() {
     </tbody></table>
     ${complete ? '<p class="hint okc"><b>All positions are filled or marked as missing.</b></p>' : `<p class="hint bad"><b>Not finished:</b> ${bad.map(s => 'String ' + esc(s.name) + ' (' + counts(s).empty + ' empty)').join(', ') || 'no strings yet'}.</p>`}
   </section>
+  ${needJob.length ? `<section class="card"><h2>Job details needed</h2><p class="hint">Fill in to unlock the files.</p><div class="field">${needJob.map(([k, l]) => `<label for="x_${k}">${l}</label><input id="x_${k}" data-xjob="${k}" value="${esc(S.job[k])}" autocomplete="off">`).join('')}</div></section>` : ''}
   <section class="card">
     <div class="field"><label for="sep">CSV separator (use semicolon for Excel in Europe)</label>
       <select id="sep"><option value=";" ${S.job.sep === ';' ? 'selected' : ''}>Semicolon ( ; )</option><option value="," ${S.job.sep === ',' ? 'selected' : ''}>Comma ( , )</option></select></div>
@@ -1035,8 +1090,9 @@ function renderExport() {
     <button class="btn wide" id="dlCsv" ${complete ? '' : 'disabled'}>Download CSV</button>
     <button class="btn wide" id="dlJson" ${complete ? '' : 'disabled'}>Download JSON</button>
     ${canShare ? `<button class="btn wide" id="shareBoth" ${complete ? '' : 'disabled'}>Share Excel + CSV + JSON (email, Teams\u2026)</button>` : ''}
-    ${!complete && sts.length ? '<button class="btn wide" id="dlPartial">Export unfinished anyway</button><p class="hint">Empty positions are marked EMPTY in the file.</p>' : ''}
+    ${!complete && sts.length && !needJob.length ? '<button class="btn wide" id="dlPartial">Export unfinished anyway</button><p class="hint">Empty positions are marked EMPTY in the file.</p>' : ''}
   </section>`;
+  $$('[data-xjob]').forEach(i => { i.addEventListener('input', () => { S.job[i.dataset.xjob] = i.value; save(); }); i.addEventListener('change', () => renderExport()); });
   $('#sep').addEventListener('change', e => { S.job.sep = e.target.value; save(false); });
   const doCsv = () => { download(fileBase() + '.csv', csvText(S.job.sep), 'text/csv;charset=utf-8', true); S.exportedAt = new Date().toISOString(); save(false); };
   const doJson = () => { download(fileBase() + '.json', jsonText(), 'application/json'); S.exportedAt = new Date().toISOString(); save(false); };
