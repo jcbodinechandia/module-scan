@@ -1,9 +1,9 @@
 /* Module Scan - service worker. Change VERSION whenever any file changes. */
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = 'module-scan-' + VERSION;
 const FILES = [
   './', './index.html', './manifest.webmanifest',
-  './zxing-reader.js', './zxing_reader.wasm',
+  './zxing-reader.js', './zxing_reader.wasm', './scan-worker.js',
   './icon-192.png', './icon-512.png', './icon-maskable-512.png', './apple-touch-icon.png'
 ];
 

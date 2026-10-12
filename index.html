@@ -120,6 +120,33 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
 .bad{color:var(--bad)} .okc{color:var(--ok)}
 details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;align-items:center}
 .foot{font-size:.85rem;color:var(--ink2);text-align:center;margin:8px 0}
+.cam canvas#ov{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.flash{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;opacity:0;pointer-events:none;transition:opacity .1s;text-align:center;color:#fff;padding:10px}
+.flash.show{opacity:1}
+.flash.ok{background:rgba(18,128,66,.86)}
+.flash.bad{background:rgba(190,35,30,.9)}
+.flash.warn{background:rgba(185,105,0,.9)}
+.flash .big{font-size:4.8rem;line-height:1;font-weight:800}
+.flash .l1{font-size:1.45rem;font-weight:800;line-height:1.15}
+.flash .l2{font-size:1.1rem;font-family:var(--mono);font-weight:700}
+.cell.just{animation:pulse 1.1s ease-out}
+@keyframes pulse{0%{background:#3ddc84;transform:scale(1.12)}100%{transform:scale(1)}}
+.link{background:none;border:0;color:var(--accent);font-weight:600;padding:6px 2px;min-height:36px;text-decoration:underline}
+.roomline{font-size:.88rem;color:var(--ink2);margin:6px 2px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.rwrap{overflow-x:auto;padding-bottom:4px}
+.rgrid{display:grid;gap:6px;align-items:stretch}
+.rax{font-size:.75rem;color:var(--ink2);display:flex;align-items:center;justify-content:center;min-height:22px}
+.rcell{min-height:78px;border-radius:10px;border:1.5px dashed var(--line);background:transparent;color:var(--ink2);font-size:1.5rem;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:6px 4px;position:relative;overflow:hidden}
+.rcell.has{border-style:solid;background:var(--surface2);color:var(--ink);font-size:1.05rem}
+.rcell.has.ok{background:var(--ok-bg);border-color:var(--ok)}
+.rcell.has.prog{background:var(--warn-bg);border-color:var(--warn)}
+.rcell.cur{outline:4px solid var(--active);outline-offset:1px}
+.rcell small{font-size:.75rem;color:var(--ink2)}
+.rcell .rn{font-size:1.35rem;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stepper.compact button{width:44px}
+.stepper.compact output{min-width:34px}
+.rcell .pb{position:absolute;left:0;bottom:0;height:5px;background:var(--ok)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -140,7 +167,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -155,12 +182,13 @@ const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + 
 /* ================= state ================= */
 function blank() {
   return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
-           strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null };
+           strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null,
+           room: { rows: 2, cols: 4, viewFrom: '', cells: {} }, prefs: { res: 'high', engine: 'auto' } };
 }
 function load() {
   try {
     const t = localStorage.getItem(KEY);
-    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}) }); }
+    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}), prefs: Object.assign(b.prefs, o.prefs || {}) }); }
   } catch (e) {}
   return blank();
 }
@@ -202,6 +230,9 @@ function findSerial(serial, exclude) {
   }
   return null;
 }
+function cellOf(id) { for (const k in S.room.cells) if (S.room.cells[k] === id) { const [r, c] = k.split('-').map(Number); return { r, c }; } return null; }
+function unplace(id) { for (const k in S.room.cells) if (S.room.cells[k] === id) delete S.room.cells[k]; }
+const roomText = id => { const c = cellOf(id); return c ? 'Row ' + c.r + ' \u00b7 Column ' + c.c : ''; };
 const posText = (st, s, m) => 'String ' + st.name + ' \u00b7 Shelf ' + s + ' \u00b7 Module ' + m;
 function posCode(st, s, m) {
   const n = /^\d+$/.test(st.name) ? 'S' + st.name : st.name.replace(/\s+/g, '_');
@@ -222,7 +253,7 @@ function go(v, o = {}) {
   if (o.replace) history.replaceState({ v }, ''); else history.pushState({ v }, '');
   render(); window.scrollTo(0, 0);
 }
-function render() { ({ home: renderHome, layout: renderLayout, scan: renderScan, export: renderExport })[view](); }
+function render() { ({ home: renderHome, layout: renderLayout, scan: renderScan, export: renderExport, room: renderRoom })[view](); }
 history.replaceState({ v: 'home' }, '');
 window.addEventListener('popstate', e => {
   const v = (e.state && e.state.v) || 'home';
@@ -272,11 +303,18 @@ function renderHome() {
         <div class="bar"><i style="width:${pct}%"></i></div></button>`;
     }).join('') : '<p class="hint">No string yet. Add a string, set its shelves and modules, then scan.</p>'}
     <button class="btn primary wide" id="addStr">Add string</button>
+    <button class="btn wide" id="toRoom">Room layout (where each string stands)</button>
   </section>
   <section class="card">
     <button class="btn wide" id="toExport" ${strs.length ? '' : 'disabled'}>Review and export</button>
     <button class="btn danger wide" id="newJob" ${strs.length || j.vessel ? '' : 'disabled'}>Start new job</button>
   </section>
+  <details class="card"><summary>Scanner settings</summary>
+    <div class="field"><label for="p_res">Camera quality</label>
+      <select id="p_res"><option value="high" ${S.prefs.res !== 'normal' ? 'selected' : ''}>High (up to 4K): scans from further away</option><option value="normal" ${S.prefs.res === 'normal' ? 'selected' : ''}>Normal (1080p): faster on older phones</option></select>
+      <label for="p_eng">Reader</label>
+      <select id="p_eng"><option value="auto" ${S.prefs.engine !== 'zxing' ? 'selected' : ''}>Automatic (phone reader if available)</option><option value="zxing" ${S.prefs.engine === 'zxing' ? 'selected' : ''}>ZXing only</option></select></div>
+    <p class="hint">Changes apply the next time the camera starts.</p></details>
   ${standalone ? '' : `<details class="card"><summary>Install for offline use</summary>
     <p class="hint"><b>iPhone (Safari):</b> tap Share, then Add to Home Screen.<br><b>Android (Chrome):</b> tap the menu, then Install app or Add to Home screen.<br>Open the app once with internet first. After that it works offline.</p></details>`}
   <div class="foot" id="offstat"></div>
@@ -285,12 +323,16 @@ function renderHome() {
   $$('[data-job]').forEach(i => i.addEventListener('input', () => { S.job[i.dataset.job] = i.value; i.classList.remove('err'); save(); }));
   $$('[data-open]').forEach(b => b.addEventListener('click', () => { S.cur = b.dataset.open; const st = cur(); const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); }));
   $('#addStr').addEventListener('click', addString);
+  $('#toRoom').addEventListener('click', () => go('room'));
+  $('#p_res').addEventListener('change', e => { S.prefs.res = e.target.value; save(false); });
+  $('#p_eng').addEventListener('change', e => { S.prefs.engine = e.target.value; save(false); });
   $('#toExport').addEventListener('click', () => go('export'));
   $('#newJob').addEventListener('click', newJob);
   offlineStatus(); updateStatus();
 }
+function missingJob() { return [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim()); }
 function addString() {
-  const need = [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim());
+  const need = missingJob();
   if (need.length) {
     need.forEach(([k]) => $('#j_' + k).classList.add('err'));
     $('#j_' + need[0][0]).focus();
@@ -322,9 +364,9 @@ function updateStatus() {
 
 /* ================= LAYOUT ================= */
 function nextName() { const nums = S.strings.map(s => parseInt(s.name, 10)).filter(n => !isNaN(n)); return String((nums.length ? Math.max(...nums) : 0) + 1); }
-function startLayout(st) {
-  if (st) draft = { id: st.id, name: st.name, shelves: st.shelves.slice(), isNew: false };
-  else { const last = S.strings[S.strings.length - 1]; draft = { id: uid(), name: nextName(), shelves: last ? last.shelves.slice() : [6, 6], isNew: true }; }
+function startLayout(st, place) {
+  if (st) draft = { id: st.id, name: st.name, shelves: st.shelves.slice(), isNew: false, placeAt: null };
+  else { const last = S.strings[S.strings.length - 1]; draft = { id: uid(), name: nextName(), shelves: last ? last.shelves.slice() : [6, 6], isNew: true, placeAt: place || null }; }
   go('layout');
 }
 function rackPreview(shelves, slots, activePos, withSerial) {
@@ -354,7 +396,8 @@ function renderLayout() {
   }
   $('#view').innerHTML = `
   <section class="card">
-    <div class="field"><label for="l_name">String name or number</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
+    <div class="field"><label for="l_name">String name or number (any order is fine)</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
+    <p class="hint">Room position: ${d.placeAt ? 'Row ' + d.placeAt.r + ' \u00b7 Column ' + d.placeAt.c : (!d.isNew && roomText(d.id)) || 'not placed yet (use Room layout)'}</p>
     <h3>Number of shelves</h3>
     <div class="stepper"><button id="shMinus" aria-label="Fewer shelves">\u2212</button><output id="shCount">${d.shelves.length}</output><button id="shPlus" aria-label="More shelves">+</button></div>
     <h3>Modules on each shelf</h3>
@@ -384,7 +427,7 @@ function renderLayout() {
   const del = $('#delString'); if (del) del.addEventListener('click', () => {
     const st = strById(d.id); const c = counts(st);
     if (!confirm('Delete String ' + st.name + (c.ok + c.missing ? ' and its ' + (c.ok + c.missing) + ' scanned positions' : '') + '?')) return;
-    S.strings = S.strings.filter(s => s.id !== d.id); if (S.cur === d.id) S.cur = null; draft = null; save(); go('home', { replace: true });
+    S.strings = S.strings.filter(s => s.id !== d.id); unplace(d.id); if (S.cur === d.id) S.cur = null; draft = null; save(); go('home', { replace: true });
   });
 }
 function saveLayout() {
@@ -393,6 +436,7 @@ function saveLayout() {
   if (S.strings.some(s => s.id !== d.id && s.name.trim().toLowerCase() === name.toLowerCase())) { toast('This string name is already used'); return; }
   if (d.isNew) {
     S.strings.push({ id: d.id, name, shelves: d.shelves.slice(), slots: {} });
+    if (d.placeAt && !S.room.cells[key(d.placeAt.r, d.placeAt.c)]) S.room.cells[key(d.placeAt.r, d.placeAt.c)] = d.id;
   } else {
     const st = strById(d.id);
     const lost = Object.keys(st.slots).filter(k => { const [sh, m] = k.split('-').map(Number); return !(sh <= d.shelves.length && m <= d.shelves[sh - 1]); });
@@ -405,32 +449,91 @@ function saveLayout() {
 }
 
 /* ================= SCAN ================= */
-const HINT = 'Hold the phone close. The barcode should fill about half of the screen width.';
-const cam = { stream: null, track: null, running: false, armed: true, busy: false, timer: null, wake: null, last: { text: '', t: 0 }, frame: 0, audio: null, torch: false };
+const HINT = 'Hold the phone steady with the barcode on the yellow line. If it does not read, move closer.';
+const cam = { stream: null, track: null, running: false, runId: 0, armed: true, worker: null, workerReady: false, workerFailed: false,
+  wtimer: null, ntimer: null, sint: null, nbusy: false, nfail: 0, det: null, passN: 0, flip: 0, lastCT: -1, wake: null,
+  last: { text: '', t: 0, outcome: '' }, audio: null, torch: false, srcW: 0, stats: { n: 0, ms: 0, t0: 0 }, ovT: null, flashT: null, justKey: '' };
 const cv = document.createElement('canvas');
 const cx = cv.getContext('2d', { willReadFrequently: true });
+const PASS = {
+  band:  { fx0: 0, fy0: .22, fw: 1, fh: .56, maxW: 1400, opts: { tryHarder: true, tryRotate: false, binarizer: 'LocalAverage' } },
+  hires: { fx0: 0, fy0: .22, fw: 1, fh: .56, maxW: 2600, opts: { tryHarder: true, tryRotate: false, binarizer: 'LocalAverage' } },
+  wide:  { fx0: 0, fy0: 0,   fw: 1, fh: 1,   maxW: 1600, opts: { tryHarder: true, tryRotate: true,  binarizer: 'GlobalHistogram' } }
+};
+const CYCLE = ['band', 'hires', 'band', 'wide'];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const sheetOpen = () => $('#sheetBg').classList.contains('open');
+
+/* --- reader engines --- */
 let zxReady = null;
 function zxPrepare() {
   if (!zxReady) zxReady = ZXingWASM.prepareZXingModule({
-    overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? 'zxing_reader.wasm' : prefix + p },
-    fireImmediately: true });
+    overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? 'zxing_reader.wasm' : prefix + p }, fireImmediately: true });
   return zxReady;
 }
+let seq = 0; const pending = new Map();
+function initWorker() {
+  if (cam.workerReady) return Promise.resolve(true);
+  if (cam.workerFailed) return Promise.resolve(false);
+  return new Promise(resolve => {
+    let w; try { w = new Worker('scan-worker.js'); } catch (e) { cam.workerFailed = true; return resolve(false); }
+    let settled = false;
+    const fail = () => { cam.workerFailed = true; cam.workerReady = false; cam.worker = null; try { w.terminate(); } catch (e) {} pending.forEach(f => f({ results: [] })); pending.clear(); if (!settled) { settled = true; resolve(false); } };
+    const to = setTimeout(fail, 10000);
+    w.onmessage = e => {
+      const m = e.data;
+      if (m.type === 'ready') { clearTimeout(to); cam.worker = w; cam.workerReady = true; settled = true; resolve(true); }
+      else if (m.type === 'error') { clearTimeout(to); fail(); }
+      else if (m.type === 'result') { const f = pending.get(m.id); if (f) { pending.delete(m.id); f(m); } }
+    };
+    w.onerror = () => { clearTimeout(to); fail(); };
+    w.postMessage({ type: 'init' });
+  });
+}
+function decodeAsync(img, opts) {
+  if (cam.workerReady && cam.worker) {
+    return new Promise(res => {
+      const id = ++seq; pending.set(id, m => res(m.results || []));
+      cam.worker.postMessage({ type: 'scan', id, buf: img.data.buffer, w: img.width, h: img.height, opts }, [img.data.buffer]);
+    });
+  }
+  return zxPrepare().then(() => ZXingWASM.readBarcodes(img, Object.assign({ formats: ['Code128'], maxNumberOfSymbols: 3 }, opts)))
+    .then(rs => rs.filter(r => r.isValid && r.text).map(r => ({ text: r.text, format: r.format, pts: [r.position.topLeft, r.position.topRight, r.position.bottomRight, r.position.bottomLeft] })));
+}
+async function initNative() {
+  cam.det = null; cam.nfail = 0;
+  if (S.prefs.engine === 'zxing') return;
+  try {
+    if (!('BarcodeDetector' in window)) return;
+    const f = await BarcodeDetector.getSupportedFormats();
+    if (f.includes('code_128')) cam.det = new BarcodeDetector({ formats: ['code_128'] });
+  } catch (e) { cam.det = null; }
+}
+
+/* --- screen --- */
 function renderScan() {
   const st = cur(); if (!st) { go('home', { replace: true }); return; }
   setBar('String ' + st.name, true, '<button class="btn small" id="btnTorch" hidden aria-pressed="false">Torch</button><button class="btn small" id="btnLayout">Layout</button>');
   cam.armed = !!firstEmpty(st);
+  const rt = roomText(st.id);
   $('#view').innerHTML = `
-  <div class="cam idle" id="cam"><video id="vid" playsinline muted autoplay></video><div class="aim"></div>
-    <div class="off" id="camOff">Camera is off</div><div class="msg" id="camMsg" aria-live="polite">Tap Start camera</div></div>
+  <div class="cam idle" id="cam"><video id="vid" playsinline muted autoplay></video><canvas id="ov"></canvas><div class="aim"></div>
+    <div class="off" id="camOff">Camera is off</div><div class="flash" id="flash" aria-hidden="true"></div><div class="msg" id="camMsg" aria-live="polite">Tap Start camera</div></div>
   <div class="caminfo" id="camInfo">${HINT}</div>
   <div class="row" style="margin-top:8px"><button class="btn primary" id="btnCam">Start camera</button><button class="btn fix" id="btnType">Type serial</button></div>
+  <div class="roomline"><span>${rt ? 'Room: R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'Not placed in room'}</span><button class="link" id="btnRoom">Room map</button><button class="link" id="btnQual">Quality: ${S.prefs.res === 'normal' ? 'Normal' : 'High'}</button></div>
   <div class="banner" id="banner"></div>
   <div id="rackWrap"></div>
   <div id="doneWrap"></div>`;
   $('#btnCam').addEventListener('click', () => cam.running ? stopCam() : startCam());
   $('#btnType').addEventListener('click', () => { if (S.pos) openSlot(S.pos.shelf, S.pos.module, true); });
   $('#btnLayout').addEventListener('click', () => { stopCam(); startLayout(st); });
+  $('#btnRoom').addEventListener('click', () => { stopCam(); go('room'); });
+  $('#btnQual').addEventListener('click', async () => {
+    S.prefs.res = S.prefs.res === 'normal' ? 'high' : 'normal'; save(false);
+    $('#btnQual').textContent = 'Quality: ' + (S.prefs.res === 'normal' ? 'Normal' : 'High');
+    if (cam.running) { stopCam(true); await startCam(); }
+  });
   $('#btnTorch').addEventListener('click', toggleTorch);
   $('#rackWrap').addEventListener('click', e => {
     const b = e.target.closest('.cell'); if (!b) return;
@@ -444,11 +547,13 @@ function renderScan() {
 function updateScan() {
   const st = cur(); if (!st || view !== 'scan') return;
   const c = counts(st), done = c.ok + c.missing, complete = c.empty === 0;
+  const lastTxt = cam.lastSaved ? '<br>Last \u2713 ' + esc(cam.lastSaved) : '';
   const b = $('#banner');
-  if (complete) { b.className = 'banner done'; b.innerHTML = '<b>String complete</b><span>' + done + ' of ' + c.total + ' done</span>'; }
+  if (complete) { b.className = 'banner done'; b.innerHTML = '<b>String complete</b><span>' + done + ' of ' + c.total + ' done' + lastTxt + '</span>'; }
   else if (!cam.armed) { b.className = 'banner'; b.innerHTML = '<b>Paused</b><span>' + done + ' of ' + c.total + ' done<br>Tap an empty module</span>'; }
-  else { b.className = 'banner'; b.innerHTML = '<b>Shelf ' + S.pos.shelf + ' \u00b7 Module ' + S.pos.module + '</b><span>' + done + ' of ' + c.total + ' done</span>'; }
-  $('#rackWrap').innerHTML = rackPreview(st.shelves, st.slots, (cam.armed && !complete) || !complete ? S.pos : null, true);
+  else { b.className = 'banner'; b.innerHTML = '<b>Shelf ' + S.pos.shelf + ' \u00b7 Module ' + S.pos.module + '</b><span>' + done + ' of ' + c.total + ' done' + lastTxt + '</span>'; }
+  $('#rackWrap').innerHTML = rackPreview(st.shelves, st.slots, complete ? null : S.pos, true);
+  if (cam.justKey) { const j = $('#rackWrap .cell[data-s="' + cam.justKey.split('-')[0] + '"][data-m="' + cam.justKey.split('-')[1] + '"]'); if (j) j.classList.add('just'); }
   const dw = $('#doneWrap');
   dw.innerHTML = complete ? '<button class="btn primary wide" id="nextStr">Add next string</button><button class="btn wide" id="toHome">Back to strings</button><button class="btn wide" id="toExp">Review and export</button>' : '';
   if (complete) {
@@ -457,36 +562,63 @@ function updateScan() {
     $('#toExp').addEventListener('click', () => { stopCam(); go('export'); });
   }
 }
+
+/* --- feedback --- */
 function setMsg(text, kind) { const m = $('#camMsg'); if (m) { m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); } }
 function ensureAudio() { try { if (!cam.audio) cam.audio = new (window.AudioContext || window.webkitAudioContext)(); if (cam.audio.state === 'suspended') cam.audio.resume(); } catch (e) {} }
-function beep(freq, dur) {
-  try { if (!cam.audio) return; const o = cam.audio.createOscillator(), g = cam.audio.createGain(); o.frequency.value = freq; g.gain.value = .15; o.connect(g); g.connect(cam.audio.destination); o.start(); o.stop(cam.audio.currentTime + dur); } catch (e) {}
+function tone(freq, start, dur, vol) {
+  try { if (!cam.audio) return; const t = cam.audio.currentTime + start, o = cam.audio.createOscillator(), g = cam.audio.createGain();
+    o.frequency.value = freq; g.gain.setValueAtTime(vol || .2, t); g.gain.exponentialRampToValueAtTime(.001, t + dur); o.connect(g); g.connect(cam.audio.destination); o.start(t); o.stop(t + dur + .02); } catch (e) {}
 }
 function vib(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
-function feedback(kind, msg) {
-  const c = $('#cam'); if (c) { c.classList.remove('hit', 'bad'); void c.offsetWidth; c.classList.add(kind === 'ok' ? 'hit' : 'bad'); setTimeout(() => c && c.classList.remove('hit', 'bad'), 800); }
-  setMsg(msg, kind);
-  if (kind === 'ok') { beep(880, .09); vib(60); } else { beep(220, .25); vib([80, 60, 80]); }
+function flash(kind, big, l1, l2, ms) {
+  const f = $('#flash'); if (!f) return;
+  f.className = 'flash ' + kind + ' show';
+  f.innerHTML = '<div class="big">' + big + '</div><div class="l1">' + esc(l1) + '</div>' + (l2 ? '<div class="l2">' + esc(l2) + '</div>' : '');
+  clearTimeout(cam.flashT); cam.flashT = setTimeout(() => f.classList.remove('show'), ms);
 }
+function feedback(kind, msg, big, l1, l2) {
+  setMsg(msg, kind === 'warn' ? 'bad' : kind);
+  if (kind === 'ok') { flash('ok', '\u2713', l1, l2, 600); tone(880, 0, .09); tone(1320, .09, .12); vib(70); }
+  else if (kind === 'warn') { flash('warn', '!', l1, l2, 1500); tone(660, 0, .12); tone(660, .16, .12); vib([60, 40, 60]); }
+  else { flash('bad', '\u2715', l1, l2, 1800); tone(180, 0, .35, .25); vib([120, 60, 120]); }
+}
+function drawBox(pts, color) {
+  const ov = $('#ov'); if (!ov) return;
+  const w = ov.clientWidth, h = ov.clientHeight; if (ov.width !== w || ov.height !== h) { ov.width = w; ov.height = h; }
+  const g = ov.getContext('2d'); g.clearRect(0, 0, w, h);
+  g.lineWidth = 5; g.strokeStyle = color; g.lineJoin = 'round'; g.beginPath();
+  pts.forEach((p, i) => { const x = p.x * w, y = p.y * h; if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+  g.closePath(); g.stroke();
+  clearTimeout(cam.ovT); cam.ovT = setTimeout(() => { const o = $('#ov'); if (o) o.getContext('2d').clearRect(0, 0, o.width, o.height); }, 450);
+}
+
+/* --- camera control --- */
 async function startCam() {
   if (cam.running) return;
   ensureAudio();
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setMsg('Camera needs a secure link (https). Use Type serial instead.', 'bad'); return; }
   setMsg('Starting camera\u2026');
   try {
-    await zxPrepare();
-    cam.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const hi = S.prefs.res !== 'normal';
+    cam.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: hi ? 3840 : 1920 }, height: { ideal: hi ? 2160 : 1080 } } });
     const v = $('#vid'); v.srcObject = cam.stream; await v.play();
     cam.track = cam.stream.getVideoTracks()[0];
     const caps = (cam.track.getCapabilities && cam.track.getCapabilities()) || {};
     try { if (caps.focusMode && caps.focusMode.includes('continuous')) await cam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
     const tb = $('#btnTorch'); if (tb) tb.hidden = !caps.torch;
-    const set = cam.track.getSettings ? cam.track.getSettings() : {};
-    const info = $('#camInfo'); if (info && set.width) info.textContent = 'Camera ' + set.width + '\u00d7' + set.height + '. ' + HINT + (set.width < 1280 && set.height < 1280 ? ' Low camera resolution: scanning may be harder.' : '');
     try { if (navigator.wakeLock) cam.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
-    cam.running = true; $('#camOff').style.display = 'none'; $('#cam').classList.remove('idle'); $('#btnCam').textContent = 'Stop camera';
+    $('#camOff').style.display = 'none'; $('#cam').classList.remove('idle'); $('#btnCam').textContent = 'Stop camera';
+    setMsg('Loading scanner\u2026');
+    const okW = await initWorker(); if (!okW) await zxPrepare();
+    await initNative();
+    if (!cam.stream) return;               // stopped while loading
+    cam.running = true; const rid = ++cam.runId; cam.passN = 0; cam.lastCT = -1;
     const st = cur(); if (st && !firstEmpty(st)) { cam.armed = false; setMsg('String complete. Tap a module to rescan it.'); } else setMsg('Scanning\u2026 aim at the barcode');
-    updateScan(); loop();
+    updateScan();
+    cam.stats = { n: 0, ms: 0, t0: performance.now() };
+    cam.sint = setInterval(updateInfo, 1500);
+    pumpWorker(rid); if (cam.det) pumpNative(rid);
   } catch (e) {
     cam.running = false;
     const n = e && e.name;
@@ -495,7 +627,8 @@ async function startCam() {
   }
 }
 function stopCam(keepMsg) {
-  clearTimeout(cam.timer); cam.running = false;
+  cam.running = false; cam.runId++;
+  clearTimeout(cam.wtimer); clearTimeout(cam.ntimer); clearInterval(cam.sint);
   if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
   cam.stream = null; cam.track = null; cam.torch = false;
   try { if (cam.wake) cam.wake.release(); } catch (e) {} cam.wake = null;
@@ -507,6 +640,15 @@ function stopCam(keepMsg) {
   const tb = $('#btnTorch'); if (tb) { tb.hidden = true; tb.setAttribute('aria-pressed', 'false'); }
   if (!keepMsg) setMsg('Camera is off. Tap Start camera');
 }
+function updateInfo() {
+  const ci = $('#camInfo'); if (!ci || !cam.running) return;
+  const dt = (performance.now() - cam.stats.t0) / 1000 || 1;
+  const set = cam.track && cam.track.getSettings ? cam.track.getSettings() : {};
+  const eng = cam.det ? (cam.workerReady ? 'phone reader + ZXing' : 'phone reader') : (cam.workerReady ? 'ZXing' : 'ZXing (slow mode)');
+  const avg = cam.stats.n ? Math.round(cam.stats.ms / cam.stats.n) : 0;
+  ci.textContent = 'Camera ' + (set.width || '?') + '\u00d7' + (set.height || '?') + ' \u00b7 ' + eng + ' \u00b7 ' + (cam.stats.n / dt).toFixed(1) + ' reads/s' + (avg ? ' (' + avg + ' ms)' : '') + '. ' + HINT;
+  cam.stats = { n: 0, ms: 0, t0: performance.now() };
+}
 async function toggleTorch() {
   if (!cam.track) return;
   const on = !cam.torch;
@@ -515,53 +657,171 @@ async function toggleTorch() {
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden && cam.running) stopCam(); });
 
-function grab() {
+/* --- frame loop --- */
+function visRect() {
   const v = $('#vid'); if (!v || !v.videoWidth) return null;
   const vw = v.videoWidth, vh = v.videoHeight, box = v.getBoundingClientRect();
   const ba = box.width / box.height, va = vw / vh;
   let sw, sh, sx, sy;
   if (va > ba) { sh = vh; sw = vh * ba; sx = (vw - sw) / 2; sy = 0; } else { sw = vw; sh = vw / ba; sx = 0; sy = (vh - sh) / 2; }
-  const scale = Math.min(1, 2000 / sw), w = Math.round(sw * scale), h = Math.round(sh * scale);
-  cv.width = w; cv.height = h; cx.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
-  return cx.getImageData(0, 0, w, h);
+  return { sx, sy, sw, sh };
 }
-async function loop() {
-  if (!cam.running) return;
-  if (cam.armed && !cam.busy && !document.hidden && $('#sheetBg').classList.contains('open') === false) {
-    cam.busy = true;
-    try {
-      const img = grab();
-      if (img) {
-        const res = await ZXingWASM.readBarcodes(img, { formats: ['Code128'], tryHarder: true, tryRotate: true, maxNumberOfSymbols: 3, binarizer: (cam.frame++ % 2) ? 'GlobalHistogram' : 'LocalAverage' });
-        const good = res.filter(r => r.isValid && r.text);
-        if (good.length) {
-          const mx = img.width / 2, my = img.height / 2;
-          const dist = r => { const p = r.position; const x = (p.topLeft.x + p.bottomRight.x + p.topRight.x + p.bottomLeft.x) / 4, y = (p.topLeft.y + p.bottomRight.y + p.topRight.y + p.bottomLeft.y) / 4; return Math.hypot(x - mx, y - my); };
-          good.sort((a, b) => dist(a) - dist(b));
-          handleRead(good[0]);
-        }
-      }
-    } catch (e) { setMsg('Read error: ' + (e && e.message || e), 'bad'); }
-    cam.busy = false;
+function nextPass() {
+  let p = CYCLE[cam.passN++ % CYCLE.length];
+  if (p === 'hires' && cam.srcW <= 1500) p = 'band';
+  const pass = Object.assign({}, PASS[p]);
+  if (p === 'wide') { pass.opts = Object.assign({}, pass.opts, { binarizer: (cam.flip++ % 2) ? 'GlobalHistogram' : 'LocalAverage' }); }
+  return pass;
+}
+function grab(pass) {
+  const v = $('#vid'), R = visRect(); if (!R) return null;
+  cam.srcW = R.sw;
+  const rx = R.sx + pass.fx0 * R.sw, ry = R.sy + pass.fy0 * R.sh, rw = pass.fw * R.sw, rh = pass.fh * R.sh;
+  const scale = Math.min(1, pass.maxW / rw), w = Math.max(16, Math.round(rw * scale)), h = Math.max(16, Math.round(rh * scale));
+  cv.width = w; cv.height = h; cx.drawImage(v, rx, ry, rw, rh, 0, 0, w, h);
+  const id = cx.getImageData(0, 0, w, h);
+  return { img: { data: id.data, width: w, height: h, colorSpace: 'srgb' }, w, h };
+}
+async function pumpWorker(rid) {
+  if (!cam.running || rid !== cam.runId) return;
+  const v = $('#vid');
+  let wait = 8;
+  if (!cam.armed || document.hidden || sheetOpen()) wait = 80;
+  else if (v && v.videoWidth && v.currentTime !== cam.lastCT) {
+    cam.lastCT = v.currentTime;
+    const pass = nextPass(), g = grab(pass);
+    if (g) {
+      const t0 = performance.now();
+      try {
+        const res = await decodeAsync(g.img, pass.opts);
+        if (!cam.running || rid !== cam.runId) return;
+        cam.stats.n++; cam.stats.ms += performance.now() - t0;
+        if (res.length) onCodes(res.map(c => ({ text: c.text, format: c.format, pts: c.pts.map(p => ({ x: pass.fx0 + p.x / g.w * pass.fw, y: pass.fy0 + p.y / g.h * pass.fh })) })));
+      } catch (e) { setMsg('Read error: ' + (e && e.message || e), 'bad'); wait = 300; }
+    }
   }
-  if (cam.running) cam.timer = setTimeout(loop, 90);
+  if (cam.running && rid === cam.runId) cam.wtimer = setTimeout(() => pumpWorker(rid), wait);
+}
+async function pumpNative(rid) {
+  if (!cam.running || rid !== cam.runId || !cam.det) return;
+  const v = $('#vid');
+  if (cam.armed && !document.hidden && !sheetOpen() && !cam.nbusy && v && v.videoWidth) {
+    cam.nbusy = true;
+    try {
+      const t0 = performance.now();
+      const r = await cam.det.detect(v);
+      if (!cam.running || rid !== cam.runId) { cam.nbusy = false; return; }
+      cam.stats.n++; cam.stats.ms += performance.now() - t0; cam.nfail = 0;
+      const R = visRect();
+      if (R && r.length) onCodes(r.filter(c => c.rawValue).map(c => ({ text: c.rawValue, format: 'Code128', pts: (c.cornerPoints && c.cornerPoints.length === 4 ? c.cornerPoints : [{ x: c.boundingBox.x, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y + c.boundingBox.height }, { x: c.boundingBox.x, y: c.boundingBox.y + c.boundingBox.height }]).map(p => ({ x: (p.x - R.sx) / R.sw, y: (p.y - R.sy) / R.sh })) })));
+    } catch (e) { if (++cam.nfail > 5) cam.det = null; }
+    cam.nbusy = false;
+  }
+  if (cam.running && rid === cam.runId && cam.det) cam.ntimer = setTimeout(() => pumpNative(rid), 25);
+}
+function onCodes(list) {
+  const cen = c => ({ x: c.pts.reduce((a, p) => a + p.x, 0) / c.pts.length, y: c.pts.reduce((a, p) => a + p.y, 0) / c.pts.length });
+  const inView = list.filter(c => { const m = cen(c); return m.x >= 0 && m.x <= 1 && m.y >= 0 && m.y <= 1; });
+  if (!inView.length) return;
+  const d = c => { const m = cen(c); return Math.hypot(m.x - .5, m.y - .5); };
+  inView.sort((a, b) => d(a) - d(b));
+  const best = inView[0], outcome = handleRead(best);
+  drawBox(best.pts, outcome === 'dup' ? '#ff5a4f' : outcome === 'warn' ? '#ffb454' : '#3ddc84');
 }
 function handleRead(r) {
-  const st = cur(); if (!st) return;
+  const st = cur(); if (!st) return '';
   const text = r.text.trim(), now = Date.now();
-  if (text === cam.last.text && now - cam.last.t < 2500) { cam.last.t = now; return; }
-  cam.last = { text, t: now };
+  if (text === cam.last.text && now - cam.last.t < 2500) { cam.last.t = now; return cam.last.outcome; }
+  cam.last = { text, t: now, outcome: '' };
   const target = { shelf: S.pos.shelf, module: S.pos.module };
   const dup = findSerial(text, { st: st.id, s: target.shelf, m: target.module });
-  if (dup) { feedback('bad', 'Already scanned in ' + posText(dup.st, dup.s, dup.m) + ': ' + text); return; }
+  if (dup) { cam.last.outcome = 'dup'; feedback('bad', 'Already scanned in ' + posText(dup.st, dup.s, dup.m) + ': ' + text, '', 'Already scanned', posText(dup.st, dup.s, dup.m)); return 'dup'; }
   const prev = st.slots[key(target.shelf, target.module)];
-  st.slots[key(target.shelf, target.module)] = { status: 'ok', serial: text, raw: r.text, format: r.format || '', model: (prev && prev.model) || '', flag: SERIAL_RE.test(text) ? '' : 'format', method: 'scan', at: new Date().toISOString() };
   const flagged = !SERIAL_RE.test(text);
+  st.slots[key(target.shelf, target.module)] = { status: 'ok', serial: text, raw: r.text, format: r.format || '', model: (prev && prev.model) || '', flag: flagged ? 'format' : '', method: 'scan', at: new Date().toISOString() };
   const nxt = nextEmpty(st, target);
   if (nxt) S.pos = nxt; else cam.armed = false;
+  cam.lastSaved = '\u2026' + text.slice(-5); cam.justKey = target.shelf + '-' + target.module;
+  setTimeout(() => { cam.justKey = ''; }, 1200);
+  cam.last.outcome = flagged ? 'warn' : 'ok';
   save();
-  feedback(flagged ? 'bad' : 'ok', (flagged ? 'Saved, but check the format: ' : 'Saved: ') + text + ' \u2192 ' + posText(st, target.shelf, target.module) + ' \u00b7 ' + r.format + ', ' + text.length + ' characters');
+  feedback(flagged ? 'warn' : 'ok', (flagged ? 'Saved, but check the format: ' : 'Saved: ') + text + ' \u00b7 ' + (r.format || 'Code128') + ', ' + text.length + ' characters', '', 'Shelf ' + target.shelf + ' \u00b7 Module ' + target.module + (flagged ? ' (check format)' : ''), '\u2026' + text.slice(-6));
   updateScan();
+  return cam.last.outcome;
+}
+
+/* ================= ROOM ================= */
+function renderRoom() {
+  setBar('Room layout', true);
+  const R = S.room;
+  const placed = new Set(Object.values(R.cells).filter(id => strById(id)));
+  const unplaced = sortedStrings().filter(s => !placed.has(s.id));
+  let g = `<div class="rwrap"><div class="rgrid" style="grid-template-columns:30px repeat(${R.cols},minmax(64px,1fr));min-width:${30 + R.cols * 70}px"><div></div>`;
+  for (let c = 1; c <= R.cols; c++) g += `<div class="rax">Col ${c}</div>`;
+  for (let r = 1; r <= R.rows; r++) {
+    g += `<div class="rax">R${r}</div>`;
+    for (let c = 1; c <= R.cols; c++) {
+      const id = R.cells[key(r, c)], st = id && strById(id);
+      if (st) {
+        const k = counts(st), done = k.ok + k.missing, pct = k.total ? Math.round(done / k.total * 100) : 0, cls = k.empty === 0 ? 'ok' : done ? 'prog' : '';
+        g += `<button class="rcell has ${cls}${S.cur === st.id ? ' cur' : ''}" data-r="${r}" data-c="${c}"><small>String</small><b class="rn">${esc(st.name)}</b><small>${done}/${k.total}</small><span class="pb" style="width:${pct}%"></span></button>`;
+      } else g += `<button class="rcell" data-r="${r}" data-c="${c}" aria-label="Empty place, row ${r}, column ${c}">+</button>`;
+    }
+  }
+  g += '</div></div>';
+  $('#view').innerHTML = `
+  <section class="card">
+    <h2>Where the strings stand</h2>
+    <p class="hint">Tap a square to place a string. Strings can be in any order and any name.</p>
+    <div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>
+    <div class="row" style="margin-top:10px;align-items:flex-start">
+      <div><div class="hint" style="margin:0 0 4px">Rows</div><div class="stepper compact"><button id="rowM" aria-label="Fewer rows">\u2212</button><output>${R.rows}</output><button id="rowP" aria-label="More rows">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Columns</div><div class="stepper compact"><button id="colM" aria-label="Fewer columns">\u2212</button><output>${R.cols}</output><button id="colP" aria-label="More columns">+</button></div></div>
+    </div>
+  </section>
+  <section class="card">${g}
+    <div class="edge">Row 1 is at the top of the map, Column 1 on the left</div>
+    ${unplaced.length ? `<p class="hint" style="margin-top:10px">Not placed yet:</p><div class="chips">${unplaced.map(s => `<span class="chip">String ${esc(s.name)}</span>`).join('')}</div>` : ''}
+  </section>`;
+  $('#r_view').addEventListener('input', e => { R.viewFrom = e.target.value; save(); });
+  const usedBeyond = (rows, cols) => Object.keys(R.cells).some(k => { const [r, c] = k.split('-').map(Number); return (r > rows || c > cols) && strById(R.cells[k]); });
+  const resize = (rows, cols) => {
+    if (rows < 1 || rows > 8 || cols < 1 || cols > 12) return;
+    if (usedBeyond(rows, cols)) { toast('Remove the strings from the outer squares first'); return; }
+    R.rows = rows; R.cols = cols; save(); renderRoom();
+  };
+  $('#rowM').addEventListener('click', () => resize(R.rows - 1, R.cols));
+  $('#rowP').addEventListener('click', () => resize(R.rows + 1, R.cols));
+  $('#colM').addEventListener('click', () => resize(R.rows, R.cols - 1));
+  $('#colP').addEventListener('click', () => resize(R.rows, R.cols + 1));
+  $$('.rcell').forEach(b => b.addEventListener('click', () => openRoomCell(+b.dataset.r, +b.dataset.c)));
+}
+function openRoomCell(r, c) {
+  const R = S.room, id = R.cells[key(r, c)], st = id && strById(id);
+  if (st) {
+    openSheet(`<h3>String ${esc(st.name)}</h3><p class="hint">Row ${r} \u00b7 Column ${c}</p>
+      <button class="btn primary wide" id="rcOpen">Open and scan</button>
+      <button class="btn wide" id="rcEdit">Edit layout</button>
+      <button class="btn wide" id="rcRemove">Remove from this place</button>
+      <button class="btn wide" id="rcClose">Close</button>`);
+    $('#rcOpen').addEventListener('click', () => { closeSheet(); S.cur = st.id; const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); });
+    $('#rcEdit').addEventListener('click', () => { closeSheet(); startLayout(st); });
+    $('#rcRemove').addEventListener('click', () => { delete R.cells[key(r, c)]; save(); closeSheet(); renderRoom(); });
+  } else {
+    const placed = new Set(Object.values(R.cells).filter(x => strById(x)));
+    const unplaced = sortedStrings().filter(s => !placed.has(s.id));
+    openSheet(`<h3>Row ${r} \u00b7 Column ${c}</h3>
+      ${unplaced.map(s => `<button class="btn wide" data-place="${s.id}">Place String ${esc(s.name)} here</button>`).join('')}
+      <button class="btn primary wide" id="rcNew">New string here</button>
+      <button class="btn wide" id="rcClose">Close</button>`);
+    $$('[data-place]').forEach(b => b.addEventListener('click', () => { R.cells[key(r, c)] = b.dataset.place; save(); closeSheet(); renderRoom(); }));
+    $('#rcNew').addEventListener('click', () => {
+      closeSheet();
+      if (missingJob().length) { toast('Fill in the job details on the first screen, then come back.'); return; }
+      startLayout(null, { r, c });
+    });
+  }
+  $('#rcClose').addEventListener('click', closeSheet);
 }
 
 /* ================= slot sheet ================= */
@@ -618,12 +878,13 @@ function allRows(incompleteOk) {
 }
 function csvText(sep) {
   const j = S.job, now = new Date().toISOString();
-  const H = ['vessel', 'project', 'system', 'string', 'shelf', 'module', 'position', 'serial', 'model', 'status', 'check', 'scanned_at', 'entry', 'barcode_format', 'engineer', 'company', 'exported_at'];
+  const H = ['vessel', 'project', 'system', 'string', 'room_row', 'room_col', 'shelf', 'module', 'position', 'serial', 'model', 'status', 'check', 'scanned_at', 'entry', 'barcode_format', 'engineer', 'company', 'exported_at'];
   const cell = x => { let t = String(x == null ? '' : x); if (/^[=+\-@]/.test(t)) t = "'" + t; return (t.includes(sep) || /["\n\r]/.test(t)) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   const lines = [H.join(sep)];
   allRows().forEach(({ st, s, m, v }) => {
     const status = !v ? 'EMPTY' : v.status === 'ok' ? 'OK' : 'MISSING';
-    lines.push([j.vessel, j.project, j.system, st.name, s, m, posCode(st, s, m), v && v.serial || '', v && v.model || '', status, v && v.flag ? 'FORMAT?' : '', v && v.at && v.status === 'ok' ? v.at : '', v && v.status === 'ok' ? v.method : '', v && v.format || '', j.engineer, j.company, now].map(cell).join(sep));
+    const rc = cellOf(st.id);
+    lines.push([j.vessel, j.project, j.system, st.name, rc ? rc.r : '', rc ? rc.c : '', s, m, posCode(st, s, m), v && v.serial || '', v && v.model || '', status, v && v.flag ? 'FORMAT?' : '', v && v.at && v.status === 'ok' ? v.at : '', v && v.status === 'ok' ? v.method : '', v && v.format || '', j.engineer, j.company, now].map(cell).join(sep));
   });
   return lines.join('\r\n') + '\r\n';
 }
@@ -632,8 +893,9 @@ function jsonText() {
   return JSON.stringify({
     app: 'module-scan', appVersion: APP_VERSION, exportedAt: new Date().toISOString(),
     job: { vessel: j.vessel, project: j.project, system: j.system, engineer: j.engineer, company: j.company, startedAt: j.startedAt },
+    room: { rows: S.room.rows, cols: S.room.cols, viewFrom: S.room.viewFrom, note: 'Row 1 is the top of the map, column 1 is the left.' },
     strings: sortedStrings().map(st => ({
-      name: st.name, shelves: st.shelves,
+      name: st.name, roomRow: (cellOf(st.id) || {}).r || null, roomCol: (cellOf(st.id) || {}).c || null, shelves: st.shelves,
       modules: (() => { const a = []; eachSlot(st, (s, m, v) => a.push({ shelf: s, module: m, position: posCode(st, s, m), status: !v ? 'empty' : v.status, serial: v && v.serial || null, model: v && v.model || null, rawBarcode: v && v.raw || null, barcodeFormat: v && v.format || null, entry: v && v.method || null, check: v && v.flag || null, scannedAt: v && v.at || null })); return a; })()
     }))
   }, null, 2);
@@ -653,8 +915,8 @@ function renderExport() {
   <section class="card">
     <h2>${esc(S.job.vessel || 'Vessel')} \u00b7 ${esc(S.job.system || 'System')}</h2>
     <p class="hint">Project ${esc(S.job.project || '-')} \u00b7 ${esc(S.job.engineer || '-')} \u00b7 ${localDate()}</p>
-    <table><thead><tr><th>String</th><th>Layout</th><th class="n">OK</th><th class="n">Missing</th><th class="n">Empty</th></tr></thead><tbody>
-    ${sts.map(st => { const c = counts(st); return `<tr><td><b>${esc(st.name)}</b></td><td>${st.shelves.length} shelves (${st.shelves.join('/')})</td><td class="n okc">${c.ok}</td><td class="n">${c.missing}</td><td class="n ${c.empty ? 'bad' : ''}">${c.empty}</td></tr>`; }).join('')}
+    <table><thead><tr><th>String</th><th>Room / layout</th><th class="n">OK</th><th class="n">Missing</th><th class="n">Empty</th></tr></thead><tbody>
+    ${sts.map(st => { const c = counts(st); return `<tr><td><b>${esc(st.name)}</b></td><td>${cellOf(st.id) ? 'R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'not placed'}<br><span class="hint">${st.shelves.length} shelves (${st.shelves.join('/')})</span></td><td class="n okc">${c.ok}</td><td class="n">${c.missing}</td><td class="n ${c.empty ? 'bad' : ''}">${c.empty}</td></tr>`; }).join('')}
     </tbody></table>
     ${complete ? '<p class="hint okc"><b>All positions are filled or marked as missing.</b></p>' : `<p class="hint bad"><b>Not finished:</b> ${bad.map(s => 'String ' + esc(s.name) + ' (' + counts(s).empty + ' empty)').join(', ') || 'no strings yet'}.</p>`}
   </section>
