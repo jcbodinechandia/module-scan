@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f2433">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Module Scan">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>Module Scan</title>
+<style>
+:root{
+  --bg:#eef1f3; --surface:#ffffff; --surface2:#e4e9ed; --ink:#12232e; --ink2:#52646f; --line:#c5cfd6;
+  --accent:#0b5c8e; --accent-ink:#ffffff;
+  --ok:#1d7a4b; --ok-bg:#dcefe4; --warn:#a85a00; --warn-bg:#fbe9cf; --bad:#b3261e; --bad-bg:#f8dcd9;
+  --active:#f2b100; --active-ink:#2b2000;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0d1820; --surface:#15252f; --surface2:#1d3340; --ink:#e7eef2; --ink2:#9db1bd; --line:#2c4352;
+    --accent:#5db4e8; --accent-ink:#06202f;
+    --ok:#5fd394; --ok-bg:#13392a; --warn:#ffb454; --warn-bg:#3d2a0d; --bad:#ff8a80; --bad-bg:#40191a;
+    --active:#ffc83d; --active-ink:#241a00;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100dvh}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+#topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;
+  padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;background:var(--surface);border-bottom:1px solid var(--line)}
+#topbar h1{font-size:1.1rem;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#topbar .icon{min-width:48px;min-height:48px;border:0;background:transparent;font-size:1.8rem;line-height:1;border-radius:12px}
+#topbar .icon[hidden]{display:none}
+#actions{display:flex;gap:6px}
+main{padding:12px 12px calc(env(safe-area-inset-bottom,0px) + 28px);max-width:640px;margin:0 auto}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.card h2{font-size:1.05rem;margin:0 0 4px}
+.card h3{font-size:.95rem;margin:14px 0 6px}
+.hint{color:var(--ink2);font-size:.9rem;margin:4px 0 8px}
+.field label{display:block;font-size:.85rem;color:var(--ink2);margin:10px 0 4px}
+input,select{width:100%;min-height:48px;font:inherit;padding:0 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+input.err{border-color:var(--bad);background:var(--bad-bg)}
+
+.btn{min-height:48px;padding:0 16px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-weight:600}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn.danger{color:var(--bad)}
+.btn.wide{width:100%;margin-top:8px}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.small{min-height:40px;padding:0 12px;font-size:.9rem}
+.row{display:flex;gap:8px;align-items:center}
+.row>*{flex:1}
+.row>.fix{flex:0 0 auto}
+
+.strrow{display:block;width:100%;text-align:left;border:1px solid var(--line);background:var(--surface2);border-radius:12px;padding:12px;margin-top:8px}
+.strrow .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.strrow b{font-size:1.05rem}
+.bar{height:8px;border-radius:4px;background:var(--line);margin-top:8px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok)}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:.8rem;font-weight:700;background:var(--surface);border:1px solid var(--line);color:var(--ink2)}
+.chip.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.chip.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+
+.stepper{display:flex;align-items:center;gap:8px}
+.stepper button{width:52px;min-height:48px;font-size:1.5rem;border-radius:12px;border:1px solid var(--line);background:var(--surface2);font-weight:700}
+.stepper output{min-width:48px;text-align:center;font-size:1.3rem;font-weight:700}
+.lrow{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--line)}
+.lrow:first-of-type{border-top:0}
+
+.cam{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3;border:3px solid transparent}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.cam.idle .aim{display:none}
+.cam .aim{position:absolute;left:5%;right:5%;top:50%;border-top:2px solid var(--active);opacity:.9;pointer-events:none}
+.cam .off{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#cfd8de;text-align:center;padding:16px}
+.cam .msg{position:absolute;left:0;right:0;bottom:0;padding:8px 12px;background:rgba(0,0,0,.7);color:#fff;font-size:.9rem;min-height:40px}
+.cam .msg.ok{background:rgba(20,110,60,.92)}
+.cam .msg.bad{background:rgba(160,30,25,.94)}
+.cam.hit{border-color:#3ddc84}
+.cam.bad{border-color:#ff5a4f}
+.caminfo{font-size:.8rem;color:var(--ink2);margin:4px 2px 0}
+
+.banner{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-radius:14px;background:var(--active);color:var(--active-ink);margin:10px 0}
+.banner b{font-size:1.3rem;line-height:1.15}
+.banner span{font-size:.9rem;text-align:right}
+.banner.done{background:var(--ok-bg);color:var(--ok);border:2px solid var(--ok)}
+
+.edge{font-size:.78rem;color:var(--ink2);text-align:center;margin:6px 0}
+.rack{display:flex;flex-direction:column;gap:8px}
+.shelf{display:block;padding:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.shelf .lab{font-weight:700;font-size:.85rem;color:var(--ink2);padding:0 0 6px 2px}
+.mods{display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:4px}
+.cell{min-height:54px;border-radius:8px;border:1.5px solid var(--line);background:var(--surface2);padding:4px 2px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
+.cell small{font-size:.72rem;color:var(--ink2)}
+.cell .sn{font-family:var(--mono);font-size:.72rem;font-weight:700}
+.cell.ok{background:var(--ok-bg);border-color:var(--ok)}
+.cell.flag{background:var(--warn-bg);border-color:var(--warn)}
+.cell.missing{background:repeating-linear-gradient(135deg,var(--surface2) 0 6px,var(--surface) 6px 12px);border-style:dashed}
+.cell.active{outline:4px solid var(--active);outline-offset:1px;border-color:var(--active)}
+
+#sheetBg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;z-index:20;align-items:flex-end;justify-content:center}
+#sheetBg.open{display:flex}
+#sheet{width:100%;max-width:640px;background:var(--surface);border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom,0px) + 16px);max-height:90dvh;overflow:auto}
+#sheet h3{margin:0 0 6px;font-size:1.1rem}
+.serial{font-family:var(--mono);font-size:1.2rem;font-weight:700;margin:6px 0;word-break:break-all}
+#toast{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 16px);z-index:30;background:#12232e;color:#fff;border-radius:12px;padding:12px 14px;display:none;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#toast.show{display:block}
+
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:8px 4px;border-top:1px solid var(--line)}
+th{font-size:.8rem;color:var(--ink2);font-weight:600;border-top:0}
+td.n{font-variant-numeric:tabular-nums;text-align:right}
+.bad{color:var(--bad)} .okc{color:var(--ok)}
+details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;align-items:center}
+.foot{font-size:.85rem;color:var(--ink2);text-align:center;margin:8px 0}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header id="topbar">
+  <button class="icon" id="back" aria-label="Back" hidden>&#8249;</button>
+  <h1 id="title">Module Scan</h1>
+  <div id="actions"></div>
+</header>
+<main id="view"></main>
+<div id="sheetBg"><div id="sheet" role="dialog" aria-modal="true"></div></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="zxing-reader.js"></script>
+<script>
+(() => {
+'use strict';
+
+/* ================= constants and helpers ================= */
+const KEY = 'modulescan.v1';
+const APP_VERSION = '1.0.0';
+// Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
+const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Math.random().toString(36).slice(2, 9);
+const key = (sh, m) => sh + '-' + m;
+const pad2 = n => String(n).padStart(2, '0');
+const localDate = d => { d = d || new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); };
+const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); };
+
+/* ================= state ================= */
+function blank() {
+  return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
+           strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null };
+}
+function load() {
+  try {
+    const t = localStorage.getItem(KEY);
+    if (t) { const o = JSON.parse(t); const b = blank(); return Object.assign(b, o, { job: Object.assign(b.job, o.job || {}) }); }
+  } catch (e) {}
+  return blank();
+}
+let S = load();
+let saveWarned = false;
+function save(touch = true) {
+  if (touch) S.changedAt = new Date().toISOString();
+  try { localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch (e) { if (!saveWarned) { saveWarned = true; alert('This phone cannot store the data (storage blocked or full). Export your files now.'); } }
+}
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+
+const strById = id => S.strings.find(s => s.id === id);
+const cur = () => strById(S.cur);
+const sortedStrings = () => S.strings.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+const totalSlots = st => st.shelves.reduce((a, b) => a + b, 0);
+function eachSlot(st, fn) { st.shelves.forEach((n, i) => { for (let m = 1; m <= n; m++) fn(i + 1, m, st.slots[key(i + 1, m)] || null); }); }
+function counts(st) {
+  let ok = 0, missing = 0, empty = 0;
+  eachSlot(st, (s, m, v) => { if (!v) empty++; else if (v.status === 'ok') ok++; else missing++; });
+  return { ok, missing, empty, total: ok + missing + empty };
+}
+function firstEmpty(st) { let r = null; eachSlot(st, (s, m, v) => { if (!v && !r) r = { shelf: s, module: m }; }); return r; }
+function nextEmpty(st, from) {
+  const a = []; eachSlot(st, (s, m, v) => a.push({ s, m, v }));
+  const i = a.findIndex(x => x.s === from.shelf && x.m === from.module);
+  for (let k = 1; k <= a.length; k++) { const x = a[(i + k) % a.length]; if (!x.v) return { shelf: x.s, module: x.m }; }
+  return null;
+}
+function findSerial(serial, exclude) {
+  for (const st of S.strings) {
+    let hit = null;
+    eachSlot(st, (s, m, v) => {
+      if (hit || !v || v.status !== 'ok' || v.serial !== serial) return;
+      if (exclude && exclude.st === st.id && exclude.s === s && exclude.m === m) return;
+      hit = { st, s, m };
+    });
+    if (hit) return hit;
+  }
+  return null;
+}
+const posText = (st, s, m) => 'String ' + st.name + ' \u00b7 Shelf ' + s + ' \u00b7 Module ' + m;
+function posCode(st, s, m) {
+  const n = /^\d+$/.test(st.name) ? 'S' + st.name : st.name.replace(/\s+/g, '_');
+  return n + '-Sh' + s + '-M' + m;
+}
+
+/* ================= view plumbing ================= */
+let view = 'home';
+let draft = null;
+function setBar(title, back, actions) {
+  $('#title').textContent = title;
+  $('#back').hidden = !back;
+  $('#actions').innerHTML = actions || '';
+}
+function go(v, o = {}) {
+  if (view === 'scan' && v !== 'scan') stopCam();
+  view = v;
+  if (o.replace) history.replaceState({ v }, ''); else history.pushState({ v }, '');
+  render(); window.scrollTo(0, 0);
+}
+function render() { ({ home: renderHome, layout: renderLayout, scan: renderScan, export: renderExport })[view](); }
+history.replaceState({ v: 'home' }, '');
+window.addEventListener('popstate', e => {
+  const v = (e.state && e.state.v) || 'home';
+  if (view === 'scan') stopCam();
+  closeSheet();
+  view = v;
+  if (v === 'layout' && !draft) view = 'home';
+  if (v === 'scan' && !cur()) view = 'home';
+  render(); window.scrollTo(0, 0);
+});
+$('#back').addEventListener('click', () => history.back());
+
+let toastT = null;
+function toast(msg, ms = 3500) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), ms);
+}
+function openSheet(html) { $('#sheet').innerHTML = html; $('#sheetBg').classList.add('open'); }
+function closeSheet() { $('#sheetBg').classList.remove('open'); $('#sheet').innerHTML = ''; }
+$('#sheetBg').addEventListener('click', e => { if (e.target.id === 'sheetBg') closeSheet(); });
+
+/* ================= HOME ================= */
+function renderHome() {
+  setBar('Module Scan', false);
+  const j = S.job;
+  const strs = sortedStrings();
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  $('#view').innerHTML = `
+  <section class="card">
+    <h2>Job details</h2>
+    <p class="hint">Enter once. Saved on this phone. Date: ${localDate()}</p>
+    <div class="field">
+      <label for="j_vessel">Vessel</label><input id="j_vessel" data-job="vessel" value="${esc(j.vessel)}" autocomplete="off">
+      <label for="j_project">Project</label><input id="j_project" data-job="project" value="${esc(j.project)}" autocomplete="off">
+      <label for="j_system">System / BMS ID</label><input id="j_system" data-job="system" value="${esc(j.system)}" autocomplete="off">
+      <label for="j_engineer">Engineer</label><input id="j_engineer" data-job="engineer" value="${esc(j.engineer)}" autocomplete="name">
+      <label for="j_company">Company (optional)</label><input id="j_company" data-job="company" value="${esc(j.company)}" autocomplete="organization">
+    </div>
+  </section>
+  <section class="card">
+    <h2>Strings</h2>
+    ${strs.length ? strs.map(st => {
+      const c = counts(st), done = c.ok + c.missing, pct = c.total ? Math.round(done / c.total * 100) : 0;
+      const chip = c.empty === 0 ? '<span class="chip ok">Complete</span>' : done ? '<span class="chip warn">In progress</span>' : '<span class="chip">Not started</span>';
+      return `<button class="strrow" data-open="${st.id}"><div class="top"><b>String ${esc(st.name)}</b>${chip}</div>
+        <div class="hint" style="margin:2px 0 0">${st.shelves.length} shelves \u00b7 ${c.total} modules \u00b7 ${done} done${c.missing ? ' (' + c.missing + ' missing)' : ''}</div>
+        <div class="bar"><i style="width:${pct}%"></i></div></button>`;
+    }).join('') : '<p class="hint">No string yet. Add a string, set its shelves and modules, then scan.</p>'}
+    <button class="btn primary wide" id="addStr">Add string</button>
+  </section>
+  <section class="card">
+    <button class="btn wide" id="toExport" ${strs.length ? '' : 'disabled'}>Review and export</button>
+    <button class="btn danger wide" id="newJob" ${strs.length || j.vessel ? '' : 'disabled'}>Start new job</button>
+  </section>
+  ${standalone ? '' : `<details class="card"><summary>Install for offline use</summary>
+    <p class="hint"><b>iPhone (Safari):</b> tap Share, then Add to Home Screen.<br><b>Android (Chrome):</b> tap the menu, then Install app or Add to Home screen.<br>Open the app once with internet first. After that it works offline.</p></details>`}
+  <div class="foot" id="offstat"></div>
+  <div class="foot" id="updstat"></div>
+  <div class="foot">Version ${APP_VERSION}. Data stays on this phone until you export it.</div>`;
+  $$('[data-job]').forEach(i => i.addEventListener('input', () => { S.job[i.dataset.job] = i.value; i.classList.remove('err'); save(); }));
+  $$('[data-open]').forEach(b => b.addEventListener('click', () => { S.cur = b.dataset.open; const st = cur(); const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); }));
+  $('#addStr').addEventListener('click', addString);
+  $('#toExport').addEventListener('click', () => go('export'));
+  $('#newJob').addEventListener('click', newJob);
+  offlineStatus(); updateStatus();
+}
+function addString() {
+  const need = [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim());
+  if (need.length) {
+    need.forEach(([k]) => $('#j_' + k).classList.add('err'));
+    $('#j_' + need[0][0]).focus();
+    toast('Please fill in: ' + need.map(n => n[1]).join(', '));
+    return;
+  }
+  startLayout(null);
+}
+function newJob() {
+  const unsaved = !S.exportedAt || (S.changedAt && S.changedAt > S.exportedAt);
+  const msg = (unsaved ? 'You have NOT exported the latest data.\n\n' : '') + 'Start a new job? All strings and scans on this phone will be deleted.';
+  if (!confirm(msg)) return;
+  const j = S.job; const keep = { engineer: j.engineer, company: j.company, sep: j.sep };
+  S = blank(); Object.assign(S.job, keep); save(false); render();
+}
+async function offlineStatus() {
+  const el = $('#offstat'); if (!el) return;
+  let ready = false;
+  try { ready = !!(window.caches && await caches.match('zxing_reader.wasm')); } catch (e) {}
+  if (!$('#offstat')) return;
+  $('#offstat').textContent = ready ? 'Offline ready \u2713' : (navigator.onLine ? 'Not yet saved for offline use. Keep this page open a few seconds, then reload.' : 'Offline, and not yet saved for offline use.');
+}
+let waitingWorker = null;
+function updateStatus() {
+  const el = $('#updstat'); if (!el) return;
+  el.innerHTML = waitingWorker ? '<button class="btn small" id="doUpd">Update available. Tap to reload</button>' : '';
+  const b = $('#doUpd'); if (b) b.addEventListener('click', () => { navigator.serviceWorker.addEventListener('controllerchange', () => location.reload()); waitingWorker.postMessage('skip'); });
+}
+
+/* ================= LAYOUT ================= */
+function nextName() { const nums = S.strings.map(s => parseInt(s.name, 10)).filter(n => !isNaN(n)); return String((nums.length ? Math.max(...nums) : 0) + 1); }
+function startLayout(st) {
+  if (st) draft = { id: st.id, name: st.name, shelves: st.shelves.slice(), isNew: false };
+  else { const last = S.strings[S.strings.length - 1]; draft = { id: uid(), name: nextName(), shelves: last ? last.shelves.slice() : [6, 6], isNew: true }; }
+  go('layout');
+}
+function rackPreview(shelves, slots, activePos, withSerial) {
+  let h = '<div class="edge">Top of rack</div><div class="rack">';
+  for (let sh = shelves.length; sh >= 1; sh--) {
+    h += `<div class="shelf"><div class="lab">Shelf ${sh}</div><div class="mods">`;
+    for (let m = 1; m <= shelves[sh - 1]; m++) {
+      const v = slots ? slots[key(sh, m)] : null;
+      let cls = 'cell', body = '<small>' + m + '</small>';
+      if (v && v.status === 'ok') { cls += v.flag ? ' flag' : ' ok'; body = '<small>' + m + '</small><span class="sn">' + esc(v.serial.slice(-5)) + '</span>'; }
+      else if (v && v.status === 'missing') { cls += ' missing'; body = '<small>' + m + '</small><span class="sn">\u2014</span>'; }
+      if (activePos && activePos.shelf === sh && activePos.module === m) cls += ' active';
+      h += withSerial ? `<button class="${cls}" data-s="${sh}" data-m="${m}" aria-label="Shelf ${sh}, module ${m}">${body}</button>` : `<div class="${cls}">${body}</div>`;
+    }
+    h += '</div></div>';
+  }
+  return h + '</div><div class="edge">Bottom of rack \u00b7 modules are numbered left to right</div>';
+}
+function renderLayout() {
+  const d = draft; if (!d) { go('home', { replace: true }); return; }
+  setBar(d.isNew ? 'New string' : 'String layout', true);
+  const others = S.strings.filter(s => s.id !== d.id);
+  let rows = '';
+  for (let sh = d.shelves.length; sh >= 1; sh--) {
+    rows += `<div class="lrow"><span><b>Shelf ${sh}</b>${sh === 1 ? ' <span class="hint">(bottom)</span>' : ''}</span>
+      <div class="stepper"><button data-mod="${sh}" data-d="-1" aria-label="Fewer modules on shelf ${sh}">\u2212</button><output>${d.shelves[sh - 1]}</output><button data-mod="${sh}" data-d="1" aria-label="More modules on shelf ${sh}">+</button></div></div>`;
+  }
+  $('#view').innerHTML = `
+  <section class="card">
+    <div class="field"><label for="l_name">String name or number</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
+    <h3>Number of shelves</h3>
+    <div class="stepper"><button id="shMinus" aria-label="Fewer shelves">\u2212</button><output id="shCount">${d.shelves.length}</output><button id="shPlus" aria-label="More shelves">+</button></div>
+    <h3>Modules on each shelf</h3>
+    <div>${rows}</div>
+    <div class="row" style="margin-top:10px"><input id="allN" type="number" inputmode="numeric" min="1" max="30" placeholder="Same for all shelves"><button class="btn fix" id="applyAll">Apply</button></div>
+    ${others.length ? `<h3>Copy layout from another string</h3><select id="copyFrom"><option value="">Choose a string\u2026</option>${others.map(o => `<option value="${o.id}">String ${esc(o.name)} (${o.shelves.join(' / ')})</option>`).join('')}</select>` : ''}
+  </section>
+  <section class="card"><h3 style="margin-top:0">Preview</h3>${rackPreview(d.shelves, null, null, false)}</section>
+  <button class="btn primary wide" id="saveLayout">${d.isNew ? 'Save and start scanning' : 'Save layout'}</button>
+  <button class="btn wide" id="cancelLayout">Cancel</button>
+  ${d.isNew ? '' : '<button class="btn danger wide" id="delString">Delete this string</button>'}`;
+  $('#l_name').addEventListener('input', e => { d.name = e.target.value; });
+  $('#shMinus').addEventListener('click', () => { if (d.shelves.length > 1) { d.shelves.pop(); renderLayout(); } });
+  $('#shPlus').addEventListener('click', () => { if (d.shelves.length < 20) { d.shelves.push(d.shelves[d.shelves.length - 1] || 6); renderLayout(); } });
+  $$('[data-mod]').forEach(b => b.addEventListener('click', () => {
+    const i = +b.dataset.mod - 1, n = d.shelves[i] + (+b.dataset.d);
+    if (n >= 1 && n <= 30) { d.shelves[i] = n; renderLayout(); }
+  }));
+  $('#applyAll').addEventListener('click', () => {
+    const n = parseInt($('#allN').value, 10);
+    if (!(n >= 1 && n <= 30)) { toast('Enter a number from 1 to 30'); return; }
+    d.shelves = d.shelves.map(() => n); renderLayout();
+  });
+  const cf = $('#copyFrom'); if (cf) cf.addEventListener('change', () => { const o = strById(cf.value); if (o) { d.shelves = o.shelves.slice(); renderLayout(); } });
+  $('#saveLayout').addEventListener('click', saveLayout);
+  $('#cancelLayout').addEventListener('click', () => { draft = null; history.back(); });
+  const del = $('#delString'); if (del) del.addEventListener('click', () => {
+    const st = strById(d.id); const c = counts(st);
+    if (!confirm('Delete String ' + st.name + (c.ok + c.missing ? ' and its ' + (c.ok + c.missing) + ' scanned positions' : '') + '?')) return;
+    S.strings = S.strings.filter(s => s.id !== d.id); if (S.cur === d.id) S.cur = null; draft = null; save(); go('home', { replace: true });
+  });
+}
+function saveLayout() {
+  const d = draft; const name = d.name.trim();
+  if (!name) { toast('Enter a string name or number'); return; }
+  if (S.strings.some(s => s.id !== d.id && s.name.trim().toLowerCase() === name.toLowerCase())) { toast('This string name is already used'); return; }
+  if (d.isNew) {
+    S.strings.push({ id: d.id, name, shelves: d.shelves.slice(), slots: {} });
+  } else {
+    const st = strById(d.id);
+    const lost = Object.keys(st.slots).filter(k => { const [sh, m] = k.split('-').map(Number); return !(sh <= d.shelves.length && m <= d.shelves[sh - 1]); });
+    if (lost.length && !confirm('This layout removes ' + lost.length + ' scanned or marked position(s). Delete them?')) return;
+    lost.forEach(k => delete st.slots[k]); st.name = name; st.shelves = d.shelves.slice();
+  }
+  S.cur = d.id; if (!S.job.startedAt) S.job.startedAt = new Date().toISOString();
+  S.pos = firstEmpty(strById(S.cur)) || { shelf: 1, module: 1 };
+  draft = null; save(); go('scan', { replace: true });
+}
+
+/* ================= SCAN ================= */
+const HINT = 'Hold the phone close. The barcode should fill about half of the screen width.';
+const cam = { stream: null, track: null, running: false, armed: true, busy: false, timer: null, wake: null, last: { text: '', t: 0 }, frame: 0, audio: null, torch: false };
+const cv = document.createElement('canvas');
+const cx = cv.getContext('2d', { willReadFrequently: true });
+let zxReady = null;
+function zxPrepare() {
+  if (!zxReady) zxReady = ZXingWASM.prepareZXingModule({
+    overrides: { locateFile: (p, prefix) => p.endsWith('.wasm') ? 'zxing_reader.wasm' : prefix + p },
+    fireImmediately: true });
+  return zxReady;
+}
+function renderScan() {
+  const st = cur(); if (!st) { go('home', { replace: true }); return; }
+  setBar('String ' + st.name, true, '<button class="btn small" id="btnTorch" hidden aria-pressed="false">Torch</button><button class="btn small" id="btnLayout">Layout</button>');
+  cam.armed = !!firstEmpty(st);
+  $('#view').innerHTML = `
+  <div class="cam idle" id="cam"><video id="vid" playsinline muted autoplay></video><div class="aim"></div>
+    <div class="off" id="camOff">Camera is off</div><div class="msg" id="camMsg" aria-live="polite">Tap Start camera</div></div>
+  <div class="caminfo" id="camInfo">${HINT}</div>
+  <div class="row" style="margin-top:8px"><button class="btn primary" id="btnCam">Start camera</button><button class="btn fix" id="btnType">Type serial</button></div>
+  <div class="banner" id="banner"></div>
+  <div id="rackWrap"></div>
+  <div id="doneWrap"></div>`;
+  $('#btnCam').addEventListener('click', () => cam.running ? stopCam() : startCam());
+  $('#btnType').addEventListener('click', () => { if (S.pos) openSlot(S.pos.shelf, S.pos.module, true); });
+  $('#btnLayout').addEventListener('click', () => { stopCam(); startLayout(st); });
+  $('#btnTorch').addEventListener('click', toggleTorch);
+  $('#rackWrap').addEventListener('click', e => {
+    const b = e.target.closest('.cell'); if (!b) return;
+    const s = +b.dataset.s, m = +b.dataset.m, v = cur().slots[key(s, m)];
+    const active = S.pos.shelf === s && S.pos.module === m;
+    if (!v && !active) { S.pos = { shelf: s, module: m }; cam.armed = true; save(false); updateScan(); }
+    else openSlot(s, m);
+  });
+  updateScan();
+}
+function updateScan() {
+  const st = cur(); if (!st || view !== 'scan') return;
+  const c = counts(st), done = c.ok + c.missing, complete = c.empty === 0;
+  const b = $('#banner');
+  if (complete) { b.className = 'banner done'; b.innerHTML = '<b>String complete</b><span>' + done + ' of ' + c.total + ' done</span>'; }
+  else if (!cam.armed) { b.className = 'banner'; b.innerHTML = '<b>Paused</b><span>' + done + ' of ' + c.total + ' done<br>Tap an empty module</span>'; }
+  else { b.className = 'banner'; b.innerHTML = '<b>Shelf ' + S.pos.shelf + ' \u00b7 Module ' + S.pos.module + '</b><span>' + done + ' of ' + c.total + ' done</span>'; }
+  $('#rackWrap').innerHTML = rackPreview(st.shelves, st.slots, (cam.armed && !complete) || !complete ? S.pos : null, true);
+  const dw = $('#doneWrap');
+  dw.innerHTML = complete ? '<button class="btn primary wide" id="nextStr">Add next string</button><button class="btn wide" id="toHome">Back to strings</button><button class="btn wide" id="toExp">Review and export</button>' : '';
+  if (complete) {
+    $('#nextStr').addEventListener('click', () => { stopCam(); startLayout(null); });
+    $('#toHome').addEventListener('click', () => { stopCam(); history.back(); });
+    $('#toExp').addEventListener('click', () => { stopCam(); go('export'); });
+  }
+}
+function setMsg(text, kind) { const m = $('#camMsg'); if (m) { m.textContent = text; m.className = 'msg' + (kind ? ' ' + kind : ''); } }
+function ensureAudio() { try { if (!cam.audio) cam.audio = new (window.AudioContext || window.webkitAudioContext)(); if (cam.audio.state === 'suspended') cam.audio.resume(); } catch (e) {} }
+function beep(freq, dur) {
+  try { if (!cam.audio) return; const o = cam.audio.createOscillator(), g = cam.audio.createGain(); o.frequency.value = freq; g.gain.value = .15; o.connect(g); g.connect(cam.audio.destination); o.start(); o.stop(cam.audio.currentTime + dur); } catch (e) {}
+}
+function vib(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+function feedback(kind, msg) {
+  const c = $('#cam'); if (c) { c.classList.remove('hit', 'bad'); void c.offsetWidth; c.classList.add(kind === 'ok' ? 'hit' : 'bad'); setTimeout(() => c && c.classList.remove('hit', 'bad'), 800); }
+  setMsg(msg, kind);
+  if (kind === 'ok') { beep(880, .09); vib(60); } else { beep(220, .25); vib([80, 60, 80]); }
+}
+async function startCam() {
+  if (cam.running) return;
+  ensureAudio();
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { setMsg('Camera needs a secure link (https). Use Type serial instead.', 'bad'); return; }
+  setMsg('Starting camera\u2026');
+  try {
+    await zxPrepare();
+    cam.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    const v = $('#vid'); v.srcObject = cam.stream; await v.play();
+    cam.track = cam.stream.getVideoTracks()[0];
+    const caps = (cam.track.getCapabilities && cam.track.getCapabilities()) || {};
+    try { if (caps.focusMode && caps.focusMode.includes('continuous')) await cam.track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch (e) {}
+    const tb = $('#btnTorch'); if (tb) tb.hidden = !caps.torch;
+    const set = cam.track.getSettings ? cam.track.getSettings() : {};
+    const info = $('#camInfo'); if (info && set.width) info.textContent = 'Camera ' + set.width + '\u00d7' + set.height + '. ' + HINT + (set.width < 1280 && set.height < 1280 ? ' Low camera resolution: scanning may be harder.' : '');
+    try { if (navigator.wakeLock) cam.wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+    cam.running = true; $('#camOff').style.display = 'none'; $('#cam').classList.remove('idle'); $('#btnCam').textContent = 'Stop camera';
+    const st = cur(); if (st && !firstEmpty(st)) { cam.armed = false; setMsg('String complete. Tap a module to rescan it.'); } else setMsg('Scanning\u2026 aim at the barcode');
+    updateScan(); loop();
+  } catch (e) {
+    cam.running = false;
+    const n = e && e.name;
+    setMsg(n === 'NotAllowedError' ? 'Camera blocked. Allow camera access for this site in your phone settings.' : n === 'NotFoundError' ? 'No camera found.' : 'Camera error: ' + (e && e.message || e), 'bad');
+    stopCam(true);
+  }
+}
+function stopCam(keepMsg) {
+  clearTimeout(cam.timer); cam.running = false;
+  if (cam.stream) cam.stream.getTracks().forEach(t => t.stop());
+  cam.stream = null; cam.track = null; cam.torch = false;
+  try { if (cam.wake) cam.wake.release(); } catch (e) {} cam.wake = null;
+  const v = $('#vid'); if (v) v.srcObject = null;
+  const off = $('#camOff'); if (off) off.style.display = 'flex';
+  const cc = $('#cam'); if (cc) cc.classList.add('idle');
+  const ci = $('#camInfo'); if (ci) ci.textContent = HINT;
+  const b = $('#btnCam'); if (b) b.textContent = 'Start camera';
+  const tb = $('#btnTorch'); if (tb) { tb.hidden = true; tb.setAttribute('aria-pressed', 'false'); }
+  if (!keepMsg) setMsg('Camera is off. Tap Start camera');
+}
+async function toggleTorch() {
+  if (!cam.track) return;
+  const on = !cam.torch;
+  try { await cam.track.applyConstraints({ advanced: [{ torch: on }] }); cam.torch = on; $('#btnTorch').setAttribute('aria-pressed', String(on)); }
+  catch (e) { toast('Torch is not available on this phone'); }
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden && cam.running) stopCam(); });
+
+function grab() {
+  const v = $('#vid'); if (!v || !v.videoWidth) return null;
+  const vw = v.videoWidth, vh = v.videoHeight, box = v.getBoundingClientRect();
+  const ba = box.width / box.height, va = vw / vh;
+  let sw, sh, sx, sy;
+  if (va > ba) { sh = vh; sw = vh * ba; sx = (vw - sw) / 2; sy = 0; } else { sw = vw; sh = vw / ba; sx = 0; sy = (vh - sh) / 2; }
+  const scale = Math.min(1, 2000 / sw), w = Math.round(sw * scale), h = Math.round(sh * scale);
+  cv.width = w; cv.height = h; cx.drawImage(v, sx, sy, sw, sh, 0, 0, w, h);
+  return cx.getImageData(0, 0, w, h);
+}
+async function loop() {
+  if (!cam.running) return;
+  if (cam.armed && !cam.busy && !document.hidden && $('#sheetBg').classList.contains('open') === false) {
+    cam.busy = true;
+    try {
+      const img = grab();
+      if (img) {
+        const res = await ZXingWASM.readBarcodes(img, { formats: ['Code128'], tryHarder: true, tryRotate: true, maxNumberOfSymbols: 3, binarizer: (cam.frame++ % 2) ? 'GlobalHistogram' : 'LocalAverage' });
+        const good = res.filter(r => r.isValid && r.text);
+        if (good.length) {
+          const mx = img.width / 2, my = img.height / 2;
+          const dist = r => { const p = r.position; const x = (p.topLeft.x + p.bottomRight.x + p.topRight.x + p.bottomLeft.x) / 4, y = (p.topLeft.y + p.bottomRight.y + p.topRight.y + p.bottomLeft.y) / 4; return Math.hypot(x - mx, y - my); };
+          good.sort((a, b) => dist(a) - dist(b));
+          handleRead(good[0]);
+        }
+      }
+    } catch (e) { setMsg('Read error: ' + (e && e.message || e), 'bad'); }
+    cam.busy = false;
+  }
+  if (cam.running) cam.timer = setTimeout(loop, 90);
+}
+function handleRead(r) {
+  const st = cur(); if (!st) return;
+  const text = r.text.trim(), now = Date.now();
+  if (text === cam.last.text && now - cam.last.t < 2500) { cam.last.t = now; return; }
+  cam.last = { text, t: now };
+  const target = { shelf: S.pos.shelf, module: S.pos.module };
+  const dup = findSerial(text, { st: st.id, s: target.shelf, m: target.module });
+  if (dup) { feedback('bad', 'Already scanned in ' + posText(dup.st, dup.s, dup.m) + ': ' + text); return; }
+  const prev = st.slots[key(target.shelf, target.module)];
+  st.slots[key(target.shelf, target.module)] = { status: 'ok', serial: text, raw: r.text, format: r.format || '', model: (prev && prev.model) || '', flag: SERIAL_RE.test(text) ? '' : 'format', method: 'scan', at: new Date().toISOString() };
+  const flagged = !SERIAL_RE.test(text);
+  const nxt = nextEmpty(st, target);
+  if (nxt) S.pos = nxt; else cam.armed = false;
+  save();
+  feedback(flagged ? 'bad' : 'ok', (flagged ? 'Saved, but check the format: ' : 'Saved: ') + text + ' \u2192 ' + posText(st, target.shelf, target.module) + ' \u00b7 ' + r.format + ', ' + text.length + ' characters');
+  updateScan();
+}
+
+/* ================= slot sheet ================= */
+function openSlot(s, m, typeFirst) {
+  const st = cur(), v = st.slots[key(s, m)];
+  const title = `<h3>${esc(posText(st, s, m))}</h3>`;
+  let info = '';
+  if (v && v.status === 'ok') info = `<div class="serial">${esc(v.serial)}</div><p class="hint">${v.method === 'manual' ? 'Typed' : 'Scanned'} ${localTime(v.at)}${v.format ? ' \u00b7 ' + esc(v.format) : ''}${v.flag ? '<br><b class="bad">Check: this serial does not match the usual pattern.</b>' : ''}</p>`;
+  else if (v && v.status === 'missing') info = '<p class="hint">Marked as missing: no module in this position.</p>';
+  else info = '<p class="hint">Empty.</p>';
+  const models = [...new Set(S.strings.flatMap(x => Object.values(x.slots).map(q => q.model).filter(Boolean)))];
+  const modelField = v && v.status === 'ok' ? `<label class="hint" for="mdl" style="display:block;margin-top:8px">Model (optional)</label><input id="mdl" list="mdls" value="${esc(v.model)}" autocomplete="off" autocapitalize="characters"><datalist id="mdls">${models.map(x => `<option value="${esc(x)}">`).join('')}</datalist>` : '';
+  const typeBox = `<div id="typeBox" style="display:${typeFirst ? 'block' : 'none'};margin-top:8px"><input id="typed" placeholder="Serial number" autocomplete="off" autocapitalize="characters" spellcheck="false" value="${v && v.status === 'ok' && v.method === 'manual' ? esc(v.serial) : ''}"><div class="row" style="margin-top:8px"><button class="btn primary" id="saveTyped">Save serial</button></div></div>`;
+  openSheet(`${title}${info}${modelField}
+    <button class="btn primary wide" id="doScan">Scan this position</button>
+    <button class="btn wide" id="doType">Type serial</button>${typeBox}
+    <button class="btn wide" id="doMissing">Mark as missing</button>
+    ${v ? '<button class="btn danger wide" id="doClear">Clear this position</button>' : ''}
+    <button class="btn wide" id="doClose">Close</button>`);
+  if (typeFirst) setTimeout(() => $('#typed') && $('#typed').focus(), 50);
+  const mdl = $('#mdl'); if (mdl) mdl.addEventListener('change', () => { v.model = mdl.value.trim().toUpperCase(); save(); });
+  $('#doClose').addEventListener('click', closeSheet);
+  $('#doScan').addEventListener('click', () => { S.pos = { shelf: s, module: m }; cam.armed = true; save(false); closeSheet(); updateScan(); if (!cam.running) startCam(); else setMsg('Scanning\u2026 aim at the barcode'); });
+  $('#doType').addEventListener('click', () => { $('#typeBox').style.display = 'block'; $('#typed').focus(); });
+  $('#saveTyped').addEventListener('click', () => {
+    const t = $('#typed').value.trim().toUpperCase();
+    if (!t) { toast('Type the serial number'); return; }
+    const dup = findSerial(t, { st: st.id, s, m });
+    if (dup) { toast('Already used in ' + posText(dup.st, dup.s, dup.m)); return; }
+    const prev = st.slots[key(s, m)];
+    st.slots[key(s, m)] = { status: 'ok', serial: t, raw: t, format: '', model: (prev && prev.model) || '', flag: SERIAL_RE.test(t) ? '' : 'format', method: 'manual', at: new Date().toISOString() };
+    const nx = nextEmpty(st, { shelf: s, module: m }); if (nx) { S.pos = nx; cam.armed = true; } else cam.armed = false;
+    save(); closeSheet(); updateScan();
+  });
+  $('#doMissing').addEventListener('click', () => {
+    st.slots[key(s, m)] = { status: 'missing', at: new Date().toISOString() };
+    const nx = nextEmpty(st, { shelf: s, module: m }); if (nx) { S.pos = nx; cam.armed = true; } else cam.armed = false;
+    save(); closeSheet(); updateScan();
+  });
+  const clr = $('#doClear'); if (clr) clr.addEventListener('click', () => {
+    delete st.slots[key(s, m)]; S.pos = { shelf: s, module: m }; cam.armed = true; save(); closeSheet(); updateScan();
+  });
+}
+
+/* ================= EXPORT ================= */
+function fileBase() {
+  const j = S.job, clean = x => String(x || '').trim().replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+  return [clean(j.project) || 'project', clean(j.system) || 'system', 'modules', localDate()].join('_');
+}
+function allRows(incompleteOk) {
+  const out = [];
+  sortedStrings().forEach(st => eachSlot(st, (s, m, v) => out.push({ st, s, m, v })));
+  return out;
+}
+function csvText(sep) {
+  const j = S.job, now = new Date().toISOString();
+  const H = ['vessel', 'project', 'system', 'string', 'shelf', 'module', 'position', 'serial', 'model', 'status', 'check', 'scanned_at', 'entry', 'barcode_format', 'engineer', 'company', 'exported_at'];
+  const cell = x => { let t = String(x == null ? '' : x); if (/^[=+\-@]/.test(t)) t = "'" + t; return (t.includes(sep) || /["\n\r]/.test(t)) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const lines = [H.join(sep)];
+  allRows().forEach(({ st, s, m, v }) => {
+    const status = !v ? 'EMPTY' : v.status === 'ok' ? 'OK' : 'MISSING';
+    lines.push([j.vessel, j.project, j.system, st.name, s, m, posCode(st, s, m), v && v.serial || '', v && v.model || '', status, v && v.flag ? 'FORMAT?' : '', v && v.at && v.status === 'ok' ? v.at : '', v && v.status === 'ok' ? v.method : '', v && v.format || '', j.engineer, j.company, now].map(cell).join(sep));
+  });
+  return lines.join('\r\n') + '\r\n';
+}
+function jsonText() {
+  const j = S.job;
+  return JSON.stringify({
+    app: 'module-scan', appVersion: APP_VERSION, exportedAt: new Date().toISOString(),
+    job: { vessel: j.vessel, project: j.project, system: j.system, engineer: j.engineer, company: j.company, startedAt: j.startedAt },
+    strings: sortedStrings().map(st => ({
+      name: st.name, shelves: st.shelves,
+      modules: (() => { const a = []; eachSlot(st, (s, m, v) => a.push({ shelf: s, module: m, position: posCode(st, s, m), status: !v ? 'empty' : v.status, serial: v && v.serial || null, model: v && v.model || null, rawBarcode: v && v.raw || null, barcodeFormat: v && v.format || null, entry: v && v.method || null, check: v && v.flag || null, scannedAt: v && v.at || null })); return a; })()
+    }))
+  }, null, 2);
+}
+function download(name, text, mime, bom) {
+  const blob = new Blob([bom ? '\ufeff' : '', text], { type: mime });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+function renderExport() {
+  setBar('Review and export', true);
+  const sts = sortedStrings();
+  const bad = sts.filter(st => counts(st).empty > 0);
+  const complete = sts.length > 0 && bad.length === 0;
+  const canShare = !!(navigator.canShare && window.File);
+  $('#view').innerHTML = `
+  <section class="card">
+    <h2>${esc(S.job.vessel || 'Vessel')} \u00b7 ${esc(S.job.system || 'System')}</h2>
+    <p class="hint">Project ${esc(S.job.project || '-')} \u00b7 ${esc(S.job.engineer || '-')} \u00b7 ${localDate()}</p>
+    <table><thead><tr><th>String</th><th>Layout</th><th class="n">OK</th><th class="n">Missing</th><th class="n">Empty</th></tr></thead><tbody>
+    ${sts.map(st => { const c = counts(st); return `<tr><td><b>${esc(st.name)}</b></td><td>${st.shelves.length} shelves (${st.shelves.join('/')})</td><td class="n okc">${c.ok}</td><td class="n">${c.missing}</td><td class="n ${c.empty ? 'bad' : ''}">${c.empty}</td></tr>`; }).join('')}
+    </tbody></table>
+    ${complete ? '<p class="hint okc"><b>All positions are filled or marked as missing.</b></p>' : `<p class="hint bad"><b>Not finished:</b> ${bad.map(s => 'String ' + esc(s.name) + ' (' + counts(s).empty + ' empty)').join(', ') || 'no strings yet'}.</p>`}
+  </section>
+  <section class="card">
+    <div class="field"><label for="sep">CSV separator (use semicolon for Excel in Europe)</label>
+      <select id="sep"><option value=";" ${S.job.sep === ';' ? 'selected' : ''}>Semicolon ( ; )</option><option value="," ${S.job.sep === ',' ? 'selected' : ''}>Comma ( , )</option></select></div>
+    <button class="btn primary wide" id="dlCsv" ${complete ? '' : 'disabled'}>Download CSV</button>
+    <button class="btn wide" id="dlJson" ${complete ? '' : 'disabled'}>Download JSON</button>
+    ${canShare ? `<button class="btn wide" id="shareBoth" ${complete ? '' : 'disabled'}>Share CSV + JSON (email, Teams\u2026)</button>` : ''}
+    ${!complete && sts.length ? '<button class="btn wide" id="dlPartial">Export unfinished anyway</button><p class="hint">Empty positions are marked EMPTY in the file.</p>' : ''}
+  </section>`;
+  $('#sep').addEventListener('change', e => { S.job.sep = e.target.value; save(false); });
+  const doCsv = () => { download(fileBase() + '.csv', csvText(S.job.sep), 'text/csv;charset=utf-8', true); S.exportedAt = new Date().toISOString(); save(false); };
+  const doJson = () => { download(fileBase() + '.json', jsonText(), 'application/json'); S.exportedAt = new Date().toISOString(); save(false); };
+  const csvBtn = $('#dlCsv'); if (csvBtn) csvBtn.addEventListener('click', doCsv);
+  const jsBtn = $('#dlJson'); if (jsBtn) jsBtn.addEventListener('click', doJson);
+  const sh = $('#shareBoth'); if (sh) sh.addEventListener('click', async () => {
+    try {
+      const files = [new File(['\ufeff' + csvText(S.job.sep)], fileBase() + '.csv', { type: 'text/csv' }), new File([jsonText()], fileBase() + '.json', { type: 'application/json' })];
+      if (navigator.canShare({ files })) { await navigator.share({ files, title: 'Module scan ' + (S.job.vessel || '') }); S.exportedAt = new Date().toISOString(); save(false); }
+      else toast('Sharing files is not supported here. Use Download.');
+    } catch (e) { if (e && e.name !== 'AbortError') toast('Sharing failed. Use Download.'); }
+  });
+  const pb = $('#dlPartial'); if (pb) pb.addEventListener('click', () => { if (confirm('Some positions are still empty. Export anyway?')) { doCsv(); setTimeout(doJson, 600); } });
+}
+
+/* ================= start ================= */
+render();
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const flag = w => { if (navigator.serviceWorker.controller) { waitingWorker = w; updateStatus(); } };
+    if (reg.waiting) flag(reg.waiting);
+    reg.addEventListener('updatefound', () => { const w = reg.installing; if (w) w.addEventListener('statechange', () => { if (w.state === 'installed') flag(w); }); });
+    reg.update().catch(() => {});
+    navigator.serviceWorker.ready.then(() => offlineStatus());
+  }).catch(() => {});
+}
+window.addEventListener('online', () => view === 'home' && offlineStatus());
+window.addEventListener('offline', () => view === 'home' && offlineStatus());
+})();
+</script>
+</body>
+</html>
