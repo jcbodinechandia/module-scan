@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.6.3';
+const APP_VERSION = '1.6.4';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -901,7 +901,7 @@ function renderRoom() {
       <button data-k=" " class="big next">Next place</button>
       <button data-k="NEWROW" class="big newrow">New row</button>
     </div>
-    <p class="hint" style="margin-top:8px"><b>Next place</b> = go to the next string in the row. <b>New row</b> = start a new line. <b>Empty</b> = no string in that place (inside an ID, like 14-25, it is a dash). <button class="link" id="kpClear">Clear all</button></p>
+    <p class="hint" style="margin-top:8px"><b>Next place</b> = go to the next string in the row. <b>New row</b> = start a new line. <b>Empty</b> = no string in that place. <button class="link" id="kpClear">Clear all</button></p>
     <div class="dgrid">
       <div><div class="hint" style="margin:0 0 4px">Middle shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer middle shelves">\u2212</button><output id="dsV">${R.def.midShelves}</output><button id="dsP" aria-label="More middle shelves">+</button></div></div>
       <div><div class="hint" style="margin:0 0 4px">Modules per middle shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules, middle shelves">\u2212</button><output id="dmV">${R.def.mid}</output><button id="dmP" aria-label="More modules, middle shelves">+</button></div></div>
@@ -927,8 +927,25 @@ function renderRoom() {
   ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
   const typeKey = k => {
     ta.focus();
-    if (k === 'back') { const s = ta.selectionStart, e2 = ta.selectionEnd; if (s !== e2) ta.setRangeText('', s, e2, 'end'); else if (s > 0) ta.setRangeText('', s - 1, s, 'end'); }
-    else ta.setRangeText(k === 'NEWROW' ? '\n' : k, ta.selectionStart, ta.selectionEnd, 'end');
+    let s = ta.selectionStart, e = ta.selectionEnd; const v = ta.value;
+    const before = v.slice(0, s), after = v.slice(e);
+    const put = (txt, from, to) => { ta.setRangeText(txt, from, to, 'end'); };
+    if (k === 'back') {
+      if (s !== e) put('', s, e);
+      else if (s > 0) {
+        if (/(^|\n)- $/.test(before)) put('', s - 2, s);          // an empty place at the start of a line: remove "- "
+        else if (/[ \t]- $/.test(before)) put('', s - 3, s);      // an empty place after a string: remove " - "
+        else put('', s - 1, s);
+      }
+    } else if (k === '-') {                                      // Empty: always a separate item, spaces added automatically
+      const lead = before && !/\s$/.test(before) ? ' ' : '', trail = after && /^\s/.test(after) ? '' : ' ';
+      put(lead + '-' + trail, s, e);
+    } else if (k === ' ') {                                      // Next place: one space, never doubled
+      if (before && !/\s$/.test(before)) put(' ', s, e);
+    } else if (k === 'NEWROW') {                                 // New row: no stray space at the end of the line
+      const cut = before.replace(/[ \t]+$/, '');
+      ta.setRangeText('\n', cut.length, e, 'end');
+    } else put(k, s, e);
     roomDraft = ta.value; $('#r_err').textContent = '';
   };
   $$('#kp button').forEach(b => {
