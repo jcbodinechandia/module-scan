@@ -145,15 +145,18 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 .rcell small{font-size:.75rem;color:var(--ink2)}
 .rcell .rn{font-size:1.35rem;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:10px;align-items:end}
 .ex{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;background:var(--surface2);border-radius:10px;padding:8px 12px;margin:6px 0 10px;font-size:.88rem;align-items:center}
 .ex span{font-family:var(--mono);font-weight:700;font-size:1rem}
 .ex i{color:var(--ink2);font-style:normal}
-.kp{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}
+.kp{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
 .kp button{min-height:54px;font-size:1.25rem;font-weight:700;border-radius:10px;border:1px solid var(--line);background:var(--surface2);padding:0 4px}
 .kp button.act{background:var(--accent);color:var(--accent-ink);font-size:.95rem}
 .kp button.sub{font-size:1rem;font-weight:600}
-.kp .wide2{grid-column:span 2}
+.kp button.emp{font-size:1.05rem}
+.kp button.big{grid-column:span 3;min-height:64px;font-size:1.2rem}
+.kp button.next{background:var(--accent);color:var(--accent-ink)}
+.kp button.newrow{background:var(--surface2);border-color:var(--accent);color:var(--accent)}
 .stepper.compact button{width:44px}
 .stepper.compact output{min-width:34px}
 .rcell .pb{position:absolute;left:0;bottom:0;height:5px;background:var(--ok)}
@@ -179,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -195,12 +198,15 @@ const localTime = iso => { const d = new Date(iso); return localDate(d) + ' ' + 
 function blank() {
   return { job: { vessel: '', project: '', system: '', engineer: '', company: '', sep: ';', startedAt: null },
            strings: [], cur: null, pos: { shelf: 1, module: 1 }, exportedAt: null, changedAt: null,
-           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { shelves: 4, bottom: 6, mid: 6, top: 6 } } };
+           room: { rows: 2, cols: 4, viewFrom: '', cells: {}, def: { midShelves: 5, mid: 4, bottom: 2, top: 2 } } };
 }
 function norm(o) {
   const b = blank(), od = (o.room && o.room.def) || {};
   const s = Object.assign(b, o, { job: Object.assign(b.job, o.job || {}), room: Object.assign(b.room, o.room || {}, { def: Object.assign(b.room.def, od) }) });
-  if (od.mods != null && od.bottom == null) { s.room.def.bottom = s.room.def.mid = s.room.def.top = od.mods; }   // older saved data
+  if (od.midShelves == null && (od.shelves != null || od.mods != null || od.bottom != null)) {
+    const oldDefault = (od.shelves === 4 || od.shelves == null) && [od.bottom, od.mid, od.top, od.mods].every(x => x == null || x === 6);
+    s.room.def = oldDefault ? { midShelves: 5, mid: 4, bottom: 2, top: 2 } : { midShelves: Math.max(1, (od.shelves || 4) - 2), mid: od.mid || od.mods || 6, bottom: od.bottom || od.mods || 6, top: od.top || od.mods || 6 };   // older saved data
+  }
   return s;
 }
 function loadDB() {
@@ -444,7 +450,7 @@ function renderLayout() {
   }
   $('#view').innerHTML = `
   <section class="card">
-    <div class="field"><label for="l_name">String number (or name). Any order is fine.</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
+    <div class="field"><label for="l_name">String ID. Any order is fine.</label><input id="l_name" value="${esc(d.name)}" autocomplete="off"></div>
     <p class="hint">Room position: ${d.placeAt ? 'Row ' + d.placeAt.r + ' \u00b7 Column ' + d.placeAt.c : (!d.isNew && roomText(d.id)) || 'not placed yet (use Room layout)'}</p>
     <h3>Number of shelves</h3>
     <div class="stepper"><button id="shMinus" aria-label="Fewer shelves">\u2212</button><output id="shCount">${d.shelves.length}</output><button id="shPlus" aria-label="More shelves">+</button></div>
@@ -579,7 +585,7 @@ function renderScan() {
     <div class="off" id="camOff">Camera is off</div><div class="flash" id="flash" aria-hidden="true"></div><div class="msg" id="camMsg" aria-live="polite">Tap Start camera</div></div>
   <div class="caminfo" id="camInfo">${HINT}</div>
   <div class="row" style="margin-top:8px"><button class="btn primary" id="btnCam">Start camera</button><button class="btn fix" id="btnType">Type serial</button></div>
-  <div class="roomline"><span>${rt ? 'Room: R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'Not placed in room'}</span><button class="link" id="btnRoom">Room map</button><button class="link" id="btnQual">Quality: ${S.prefs.res === 'normal' ? 'Normal' : 'High'}</button></div>
+  <div class="roomline"><span>${rt ? 'Room: R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'Not placed in room'}</span><button class="link" id="btnRoom">Room layout</button><button class="link" id="btnQual">Quality: ${S.prefs.res === 'normal' ? 'Normal' : 'High'}</button></div>
   <div class="banner" id="banner"></div>
   <div id="rackWrap"></div>
   <div id="doneWrap"></div>`;
@@ -810,7 +816,7 @@ function handleRead(r) {
 
 /* ================= ROOM ================= */
 let roomDraft = null;
-const defLayout = () => { const d = S.room.def, n = d.shelves; return n === 1 ? [d.bottom] : [d.bottom].concat(Array(n - 2).fill(d.mid), [d.top]); };
+const defLayout = () => { const d = S.room.def; return [d.bottom].concat(Array(d.midShelves).fill(d.mid), [d.top]); };
 const defText = () => defLayout().join(' / ');
 function roomToText() {
   const R = S.room;
@@ -845,6 +851,7 @@ function applyRoomText(text) {
     }));
   });
   if (errors.length) return { errors };
+  if (!grid.some(r => r.some(t => t))) return { errors: ['Add at least one string ID. Empty alone does not make a string.'] };
   const R = S.room, cells = {}, warn = []; let created = 0, placed = 0;
   grid.forEach((row, ri) => row.forEach((t, ci) => {
     if (!t) return;
@@ -863,76 +870,48 @@ function applyRoomText(text) {
 }
 function renderRoom() {
   setBar('Room layout', true);
-  const R = S.room;
-  const placed = new Set(Object.values(R.cells).filter(id => strById(id)));
-  const unplaced = sortedStrings().filter(s => !placed.has(s.id));
-  let g = `<div class="rwrap"><div class="rgrid" style="grid-template-columns:30px repeat(${R.cols},minmax(64px,1fr));min-width:${30 + R.cols * 70}px"><div></div>`;
-  for (let c = 1; c <= R.cols; c++) g += `<div class="rax">Col ${c}</div>`;
-  for (let r = 1; r <= R.rows; r++) {
-    g += `<div class="rax">R${r}</div>`;
-    for (let c = 1; c <= R.cols; c++) {
-      const id = R.cells[key(r, c)], st = id && strById(id);
-      if (st) {
-        const k = counts(st), done = k.ok + k.missing, pct = k.total ? Math.round(done / k.total * 100) : 0, cls = k.empty === 0 ? 'ok' : done ? 'prog' : '';
-        g += `<button class="rcell has ${cls}${S.cur === st.id ? ' cur' : ''}" data-r="${r}" data-c="${c}"><small>String</small><b class="rn">${esc(st.name)}</b><small>${done}/${k.total}</small><span class="pb" style="width:${pct}%"></span></button>`;
-      } else g += `<button class="rcell" data-r="${r}" data-c="${c}" aria-label="Empty place, row ${r}, column ${c}">+</button>`;
-    }
-  }
-  g += '</div></div>';
-  const hasMap = placed.size > 0;
-  const qsOpen = `
+  const R = S.room, hasText = Object.values(R.cells).some(id => strById(id));
+  $('#view').innerHTML = `
   <section class="card">
     <h2>Which strings are in the room?</h2>
-    <p class="hint">Enter the <b>string number</b> of each string, as they stand in the room seen from the door. One line for each row of strings.</p>
+    <p class="hint">Enter the <b>string ID</b> of each string, as they stand in the room seen from the door. One line for each row of strings.</p>
     <div class="ex"><span>7 3 12</span><i>row 1: strings 7, 3 and 12</i><span>1 - 5</span><i>row 2: string 1, an empty place, string 5</i></div>
-    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" inputmode="none" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="Strings in the room"></textarea>
+    <textarea id="r_text" rows="4" placeholder="7 3 12&#10;1 - 5" inputmode="none" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" aria-label="String IDs in the room"></textarea>
     <div class="kp" id="kp">
-      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button><button data-k="back" class="act" aria-label="Delete">\u232b</button>
-      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button><button data-k="\n" class="act">New row</button>
-      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button><button data-k=" " class="act">Next place</button>
-      <button data-k="0">0</button><button data-k="-" aria-label="Empty place">Empty</button><button data-k=":" class="sub">:</button><button data-k="x" class="sub">x</button>
-      <button data-k="/" class="sub">/</button><button data-k="abc" class="wide2 sub" id="kpAbc">ABC keyboard</button><button data-k="clear" class="sub">Clear</button>
+      <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+      <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+      <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+      <button data-k="back" class="act" aria-label="Delete">\u232b</button><button data-k="0">0</button><button data-k="-" class="emp" aria-label="Empty place">Empty</button>
+      <button data-k=" " class="big next">Next place</button>
+      <button data-k="NEWROW" class="big newrow">New row</button>
     </div>
-    <p class="hint" style="margin-top:8px"><b>Next place</b> = space between strings. <b>New row</b> = next line. <b>Empty</b> = no string in that place. Use <b>ABC keyboard</b> for names with letters.</p>
+    <p class="hint" style="margin-top:8px"><b>Next place</b> = go to the next string in the row. <b>New row</b> = start a new line. <b>Empty</b> = no string in that place. <button class="link" id="kpClear">Clear all</button></p>
     <div class="dgrid">
-      <div><div class="hint" style="margin:0 0 4px">Shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer shelves">\u2212</button><output id="dsV">${R.def.shelves}</output><button id="dsP" aria-label="More shelves">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Middle shelves</div><div class="stepper compact"><button id="dsM" aria-label="Fewer middle shelves">\u2212</button><output id="dsV">${R.def.midShelves}</output><button id="dsP" aria-label="More middle shelves">+</button></div></div>
+      <div><div class="hint" style="margin:0 0 4px">Modules per middle shelf</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules, middle shelves">\u2212</button><output id="dmV">${R.def.mid}</output><button id="dmP" aria-label="More modules, middle shelves">+</button></div></div>
       <div><div class="hint" style="margin:0 0 4px">Modules on bottom shelf</div><div class="stepper compact"><button id="dbM" aria-label="Fewer modules, bottom shelf">\u2212</button><output id="dbV">${R.def.bottom}</output><button id="dbP" aria-label="More modules, bottom shelf">+</button></div></div>
-      <div><div class="hint" style="margin:0 0 4px">Modules on middle shelves</div><div class="stepper compact"><button id="dmM" aria-label="Fewer modules, middle shelves">\u2212</button><output id="dmV">${R.def.mid}</output><button id="dmP" aria-label="More modules, middle shelves">+</button></div></div>
       <div><div class="hint" style="margin:0 0 4px">Modules on top shelf</div><div class="stepper compact"><button id="dtM" aria-label="Fewer modules, top shelf">\u2212</button><output id="dtV">${R.def.top}</output><button id="dtP" aria-label="More modules, top shelf">+</button></div></div>
     </div>
-    <p class="hint" style="margin-top:10px">New strings get: <b id="defTxt">${esc(defText())}</b> modules (bottom to top). For a different layout, add it to the string number: <b>7:3x8</b> means 3 shelves of 8 modules, <b>7:5/6/6/4</b> means shelves of 5, 6, 6 and 4 (bottom to top).</p>
+    <p class="hint" style="margin-top:10px">New strings get this layout: <b id="defTxt">${esc(defText())}</b> modules (bottom to top). You can change one string later in its own layout screen.</p>
     <div id="r_err" class="hint bad" role="alert"></div>
-    <button class="btn primary wide" id="r_apply">${hasMap ? 'Update strings and map' : 'Create strings and map'}</button>
-  </section>`;
-  const mapHtml = `  <section class="card">
-    <h2>Map</h2>
-    ${hasMap ? '' : '<p class="hint">The map appears here after quick setup. You can also tap a square to add a string.</p>'}
-    ${g}
-    <div class="edge">Row 1 is at the top of the map, Column 1 on the left. Tap a string to scan it.</div>
-    ${unplaced.length ? `<p class="hint" style="margin-top:10px">Not placed yet (tap a square to place):</p><div class="chips">${unplaced.map(s => `<span class="chip">String ${esc(s.name)}</span>`).join('')}</div>` : ''}
+    <button class="btn primary wide" id="r_apply">${hasText ? 'Update strings' : 'Create strings'}</button>
     <div class="field"><label for="r_view">Drawn as seen from (optional)</label><input id="r_view" value="${esc(R.viewFrom)}" placeholder="For example: entrance door, looking inboard" autocomplete="off"></div>
   </section>`;
-  $('#view').innerHTML = hasMap ? mapHtml + '<details class="card"><summary>Change strings and layout (type)</summary>' + qsOpen.replace('<section class="card">', '<div>').replace(/<\/section>\s*$/, '</div>') + '</details>' : qsOpen + mapHtml;
   const ta = $('#r_text'); ta.value = roomDraft != null ? roomDraft : roomToText();
   ta.addEventListener('input', () => { roomDraft = ta.value; $('#r_err').textContent = ''; });
+  const typeKey = k => {
+    ta.focus();
+    if (k === 'back') { const s = ta.selectionStart, e2 = ta.selectionEnd; if (s !== e2) ta.setRangeText('', s, e2, 'end'); else if (s > 0) ta.setRangeText('', s - 1, s, 'end'); }
+    else ta.setRangeText(k === 'NEWROW' ? '\n' : k, ta.selectionStart, ta.selectionEnd, 'end');
+    roomDraft = ta.value; $('#r_err').textContent = '';
+  };
   $$('#kp button').forEach(b => {
     b.addEventListener('pointerdown', e => e.preventDefault());   // keep the cursor in the box
-    b.addEventListener('click', () => {
-      const k = b.dataset.k;
-      if (k === 'abc') {
-        const on = ta.getAttribute('inputmode') === 'none';
-        ta.setAttribute('inputmode', on ? 'text' : 'none'); b.textContent = on ? '123 keypad' : 'ABC keyboard';
-        ta.blur(); setTimeout(() => ta.focus(), 60); return;
-      }
-      ta.focus();
-      if (k === 'clear') { ta.value = ''; }
-      else if (k === 'back') { const s = ta.selectionStart, e2 = ta.selectionEnd; if (s !== e2) ta.setRangeText('', s, e2, 'end'); else if (s > 0) ta.setRangeText('', s - 1, s, 'end'); }
-      else ta.setRangeText(k, ta.selectionStart, ta.selectionEnd, 'end');
-      roomDraft = ta.value; $('#r_err').textContent = '';
-    });
+    b.addEventListener('click', () => typeKey(b.dataset.k));
   });
+  $('#kpClear').addEventListener('click', () => { ta.value = ''; roomDraft = ''; $('#r_err').textContent = ''; });
   const step = (k, d, lo, hi, out) => { const n = R.def[k] + d; if (n >= lo && n <= hi) { R.def[k] = n; $(out).textContent = n; $('#defTxt').textContent = defText(); save(false); } };
-  [['ds', 'shelves', 1, 20], ['db', 'bottom', 1, 30], ['dm', 'mid', 1, 30], ['dt', 'top', 1, 30]].forEach(([id, k, lo, hi]) => {
+  [['ds', 'midShelves', 1, 18], ['dm', 'mid', 1, 30], ['db', 'bottom', 1, 30], ['dt', 'top', 1, 30]].forEach(([id, k, lo, hi]) => {
     $('#' + id + 'M').addEventListener('click', () => step(k, -1, lo, hi, '#' + id + 'V'));
     $('#' + id + 'P').addEventListener('click', () => step(k, 1, lo, hi, '#' + id + 'V'));
   });
@@ -940,33 +919,9 @@ function renderRoom() {
     const res = applyRoomText(ta.value);
     if (res.errors.length) { $('#r_err').innerHTML = res.errors.map(esc).join('<br>'); return; }
     roomDraft = null; renderRoom();
-    toast('Done: ' + res.placed + ' places' + (res.created ? ', ' + res.created + ' new string' + (res.created > 1 ? 's' : '') : '') + (res.warn.length ? '. ' + res.warn.join(' ') : '.'), 5000);
+    toast('Done: ' + res.placed + ' string' + (res.placed === 1 ? '' : 's') + ' in the room' + (res.created ? ', ' + res.created + ' new' : '') + (res.warn.length ? '. ' + res.warn.join(' ') : '.'), 5000);
   });
   $('#r_view').addEventListener('input', e => { R.viewFrom = e.target.value; save(); });
-  $$('.rcell').forEach(b => b.addEventListener('click', () => openRoomCell(+b.dataset.r, +b.dataset.c)));
-}
-function openRoomCell(r, c) {
-  const R = S.room, id = R.cells[key(r, c)], st = id && strById(id);
-  if (st) {
-    openSheet(`<h3>String ${esc(st.name)}</h3><p class="hint">Row ${r} \u00b7 Column ${c}</p>
-      <button class="btn primary wide" id="rcOpen">Open and scan</button>
-      <button class="btn wide" id="rcEdit">Edit layout</button>
-      <button class="btn wide" id="rcRemove">Remove from this place</button>
-      <button class="btn wide" id="rcClose">Close</button>`);
-    $('#rcOpen').addEventListener('click', () => { closeSheet(); S.cur = st.id; const fe = firstEmpty(st); if (fe) S.pos = fe; save(false); go('scan'); });
-    $('#rcEdit').addEventListener('click', () => { closeSheet(); startLayout(st); });
-    $('#rcRemove').addEventListener('click', () => { delete R.cells[key(r, c)]; save(); closeSheet(); roomDraft = null; renderRoom(); });
-  } else {
-    const placed = new Set(Object.values(R.cells).filter(x => strById(x)));
-    const unplaced = sortedStrings().filter(s => !placed.has(s.id));
-    openSheet(`<h3>Row ${r} \u00b7 Column ${c}</h3>
-      ${unplaced.map(s => `<button class="btn wide" data-place="${s.id}">Place String ${esc(s.name)} here</button>`).join('')}
-      <button class="btn primary wide" id="rcNew">New string here</button>
-      <button class="btn wide" id="rcClose">Close</button>`);
-    $$('[data-place]').forEach(b => b.addEventListener('click', () => { R.cells[key(r, c)] = b.dataset.place; save(); closeSheet(); roomDraft = null; renderRoom(); }));
-    $('#rcNew').addEventListener('click', () => { closeSheet(); startLayout(null, { r, c }); });
-  }
-  $('#rcClose').addEventListener('click', closeSheet);
 }
 
 /* ================= slot sheet ================= */
