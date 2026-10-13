@@ -182,7 +182,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.6.4';
+const APP_VERSION = '1.7.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -338,6 +338,8 @@ function renderHome() {
   </section>
   <section class="card">
     <button class="btn wide" id="toExport" ${strs.length ? '' : 'disabled'}>Review and export</button>
+    <button class="btn wide" id="dupSys" ${strs.length ? '' : 'disabled'}>Duplicate this system</button>
+    <p class="hint" style="margin:4px 2px 0">Copies the strings, layouts and room map, without any scans. Use it when another system is identical, for example the FWD and AFT room.</p>
     <button class="btn danger wide" id="delSys">Delete this system</button>
   </section>`;
   $$('[data-job]').forEach(i => i.addEventListener('input', () => { S.job[i.dataset.job] = i.value; i.classList.remove('err'); $('#title').textContent = sysTitle(S); save(); }));
@@ -346,6 +348,7 @@ function renderHome() {
   $('#toRoom').addEventListener('click', () => go('room'));
   $('#toExport').addEventListener('click', () => go('export'));
   $('#delSys').addEventListener('click', deleteSystem);
+  $('#dupSys').addEventListener('click', duplicateSystem);
 }
 function missingJob() { return [['vessel', 'Vessel'], ['project', 'Project'], ['system', 'System / BMS ID'], ['engineer', 'Engineer']].filter(([k]) => !S.job[k].trim()); }
 function addString() { startLayout(null); }
@@ -408,6 +411,19 @@ function newSystem() {
   s.job.startedAt = new Date().toISOString();
   DB.systems.push(s); activate(s.id); save();
   go('home');
+}
+function duplicateSystem() {
+  const src = S, s = blank(), idMap = {};
+  s.id = uid();
+  s.job = Object.assign({}, src.job, { system: '', startedAt: new Date().toISOString() });   // same vessel, project and engineer; the new system needs its own ID
+  s.strings = src.strings.map(st => { const id = uid(); idMap[st.id] = id; return { id, name: st.name, shelves: st.shelves.slice(), slots: {} }; });
+  s.room = JSON.parse(JSON.stringify(src.room)); s.room.cells = {};
+  for (const k in src.room.cells) if (idMap[src.room.cells[k]]) s.room.cells[k] = idMap[src.room.cells[k]];
+  s.changedAt = new Date().toISOString();
+  DB.systems.push(s); activate(s.id); save(false);
+  go('home', { replace: true });
+  const inp = $('#j_system'); if (inp) { inp.classList.add('err'); inp.focus(); }
+  toast('Duplicated: ' + s.strings.length + ' strings, no scans. Enter the System / BMS ID of the new system (for example AFT).', 6000);
 }
 function deleteSystem() {
   const unsaved = !S.exportedAt || (S.changedAt && S.changedAt > S.exportedAt);
