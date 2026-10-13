@@ -133,6 +133,9 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 .cell.just{animation:pulse 1.1s ease-out}
 @keyframes pulse{0%{background:#3ddc84;transform:scale(1.12)}100%{transform:scale(1)}}
 .link{background:none;border:0;color:var(--accent);font-weight:600;padding:6px 2px;min-height:36px;text-decoration:underline}
+.qrline{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:.88rem;color:var(--ink2);margin:4px 2px 0}
+.qrline b{color:var(--ink);word-break:break-all}
+.banner.qr{background:var(--accent);color:var(--accent-ink)}
 .roomline{font-size:.88rem;color:var(--ink2);margin:6px 2px 0;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .rwrap{overflow-x:auto;padding-bottom:4px}
 .rgrid{display:grid;gap:6px;align-items:stretch}
@@ -182,7 +185,7 @@ details summary{cursor:pointer;font-weight:600;min-height:40px;display:flex;alig
 /* ================= constants and helpers ================= */
 const KEY = 'modulescan.v1';   // old single-job storage, still read once when upgrading
 const KEY2 = 'modulescan.v2';
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 // Soft check only: the two known labels look like H + 3 characters + K + 13 characters (18 in total).
 const SERIAL_RE = /^H[0-9A-Z]{3}K[0-9A-Z]{13}$/;
 const $ = (s, r = document) => r.querySelector(s);
@@ -210,7 +213,7 @@ function norm(o) {
   return s;
 }
 function loadDB() {
-  const db = { systems: [], activeId: null, prefs: { res: 'high', engine: 'auto' } };
+  const db = { systems: [], activeId: null, prefs: { res: 'high', engine: 'auto', qrFirst: true } };
   try {
     const t = localStorage.getItem(KEY2);
     if (t) { const o = JSON.parse(t); if (o && Array.isArray(o.systems)) { db.systems = o.systems.map(s => Object.assign(norm(s), { id: s.id || uid() })); db.prefs = Object.assign(db.prefs, o.prefs || {}); return db; } }
@@ -330,7 +333,7 @@ function renderHome() {
       const c = counts(st), done = c.ok + c.missing, pct = c.total ? Math.round(done / c.total * 100) : 0;
       const chip = c.empty === 0 ? '<span class="chip ok">Complete</span>' : done ? '<span class="chip warn">In progress</span>' : '<span class="chip">Not started</span>';
       return `<button class="strrow" data-open="${st.id}"><div class="top"><b>String ${esc(st.name)}</b>${chip}</div>
-        <div class="hint" style="margin:2px 0 0">${st.shelves.length} shelves \u00b7 ${c.total} modules \u00b7 ${done} done${c.missing ? ' (' + c.missing + ' missing)' : ''}</div>
+        <div class="hint" style="margin:2px 0 0">${st.shelves.length} shelves \u00b7 ${c.total} modules \u00b7 ${done} done${c.missing ? ' (' + c.missing + ' missing)' : ''}${st.qr ? ' \u00b7 QR \u2713' : st.qrSkip ? ' \u00b7 QR skipped' : ' \u00b7 no QR'}</div>
         <div class="bar"><i style="width:${pct}%"></i></div></button>`;
     }).join('') : '<p class="hint">No string yet. Use Room layout to type all strings at once, or add one string.</p>'}
     <button class="btn primary wide" id="toRoom">Room layout: add all strings at once</button>
@@ -391,7 +394,9 @@ function renderSystems() {
     <div class="field"><label for="p_res">Camera quality</label>
       <select id="p_res"><option value="high" ${DB.prefs.res !== 'normal' ? 'selected' : ''}>High (up to 4K): scans from further away</option><option value="normal" ${DB.prefs.res === 'normal' ? 'selected' : ''}>Normal (1080p): faster on older phones</option></select>
       <label for="p_eng">Reader</label>
-      <select id="p_eng"><option value="auto" ${DB.prefs.engine !== 'zxing' ? 'selected' : ''}>Automatic (phone reader if available)</option><option value="zxing" ${DB.prefs.engine === 'zxing' ? 'selected' : ''}>ZXing only</option></select></div>
+      <select id="p_eng"><option value="auto" ${DB.prefs.engine !== 'zxing' ? 'selected' : ''}>Automatic (phone reader if available)</option><option value="zxing" ${DB.prefs.engine === 'zxing' ? 'selected' : ''}>ZXing only</option></select>
+      <label for="p_qr">String QR code (battery passport)</label>
+      <select id="p_qr"><option value="on" ${DB.prefs.qrFirst !== false ? 'selected' : ''}>Scan it first when a string is opened</option><option value="off" ${DB.prefs.qrFirst === false ? 'selected' : ''}>Do not ask</option></select></div>
     <p class="hint">Changes apply the next time the camera starts.</p></details>
   ${standalone ? '' : `<details class="card"><summary>Install for offline use</summary>
     <p class="hint"><b>iPhone (Safari):</b> tap Share, then Add to Home Screen.<br><b>Android (Chrome):</b> tap the menu, then Install app or Add to Home screen.<br>Open the app once with internet first. After that it works offline.</p></details>`}
@@ -402,6 +407,7 @@ function renderSystems() {
   $('#newSys').addEventListener('click', newSystem);
   $('#p_res').addEventListener('change', e => { DB.prefs.res = e.target.value; save(false); });
   $('#p_eng').addEventListener('change', e => { DB.prefs.engine = e.target.value; save(false); });
+  $('#p_qr').addEventListener('change', e => { DB.prefs.qrFirst = e.target.value === 'on'; save(false); });
   offlineStatus(); updateStatus();
 }
 function newSystem() {
@@ -530,6 +536,7 @@ function saveLayout() {
 
 /* ================= SCAN ================= */
 const HINT = 'Hold the phone steady with the barcode on the yellow line. If it does not read, move closer.';
+const hint = () => cam.step === 'qr' ? 'Keep the whole QR code in the picture and hold the phone steady. If it does not read, move a little back or closer.' : HINT;
 const cam = { stream: null, track: null, running: false, runId: 0, armed: true, worker: null, workerReady: false, workerFailed: false,
   wtimer: null, ntimer: null, sint: null, nbusy: false, nfail: 0, det: null, passN: 0, flip: 0, lastCT: -1, wake: null,
   last: { text: '', t: 0, outcome: '' }, audio: null, torch: false, srcW: 0, stats: { n: 0, ms: 0, t0: 0 }, ovT: null, flashT: null, justKey: '' };
@@ -541,7 +548,13 @@ const PASS = {
   wide:  { fx0: 0, fy0: 0,   fw: 1, fh: 1,   maxW: 1600, opts: { tryHarder: true, tryRotate: true,  binarizer: 'GlobalHistogram' } }
 };
 const CYCLE = ['band', 'hires', 'band', 'wide'];
+const PASS_QR = {
+  qr:   { fx0: 0, fy0: 0, fw: 1, fh: 1, maxW: 1400, opts: { formats: ['QRCode'], tryHarder: true, tryRotate: true, binarizer: 'LocalAverage' } },
+  qrhi: { fx0: 0, fy0: 0, fw: 1, fh: 1, maxW: 2400, opts: { formats: ['QRCode'], tryHarder: true, tryRotate: true, binarizer: 'GlobalHistogram' } }
+};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const qrShort = t => t.length > 30 ? t.slice(0, 14) + '\u2026' + t.slice(-12) : t;
+function findQr(text, exceptStringId) { for (const sys of DB.systems) for (const st of sys.strings) if (st.qr && st.qr.text === text && st.id !== exceptStringId) return { sys, st }; return null; }
 const sheetOpen = () => $('#sheetBg').classList.contains('open');
 
 /* --- reader engines --- */
@@ -581,32 +594,38 @@ function decodeAsync(img, opts) {
     .then(rs => rs.filter(r => r.isValid && r.text).map(r => ({ text: r.text, format: r.format, pts: [r.position.topLeft, r.position.topRight, r.position.bottomRight, r.position.bottomLeft] })));
 }
 async function initNative() {
-  cam.det = null; cam.nfail = 0;
+  cam.det = null; cam.dets = {}; cam.nfail = 0;
   if (S.prefs.engine === 'zxing') return;
   try {
     if (!('BarcodeDetector' in window)) return;
     const f = await BarcodeDetector.getSupportedFormats();
-    if (f.includes('code_128')) cam.det = new BarcodeDetector({ formats: ['code_128'] });
-  } catch (e) { cam.det = null; }
+    if (f.includes('code_128')) cam.dets.mod = new BarcodeDetector({ formats: ['code_128'] });
+    if (f.includes('qr_code')) cam.dets.qr = new BarcodeDetector({ formats: ['qr_code'] });
+    cam.det = cam.dets.mod || cam.dets.qr || null;
+  } catch (e) { cam.det = null; cam.dets = {}; }
 }
 
 /* --- screen --- */
 function renderScan() {
   const st = cur(); if (!st) { go('home', { replace: true }); return; }
   setBar('String ' + st.name, true, '<button class="btn small" id="btnTorch" hidden aria-pressed="false">Torch</button><button class="btn small" id="btnLayout">Layout</button>');
-  cam.armed = !!firstEmpty(st);
+  cam.step = (S.prefs.qrFirst !== false && !st.qr && !st.qrSkip) ? 'qr' : 'mod';
+  cam.armed = cam.step === 'qr' || !!firstEmpty(st);
   const rt = roomText(st.id);
   $('#view').innerHTML = `
   <div class="cam idle" id="cam"><video id="vid" playsinline muted autoplay></video><canvas id="ov"></canvas><div class="aim"></div>
     <div class="off" id="camOff">Camera is off</div><div class="flash" id="flash" aria-hidden="true"></div><div class="msg" id="camMsg" aria-live="polite">Tap Start camera</div></div>
-  <div class="caminfo" id="camInfo">${HINT}</div>
+  <div class="caminfo" id="camInfo">${hint()}</div>
   <div class="row" style="margin-top:8px"><button class="btn primary" id="btnCam">Start camera</button><button class="btn fix" id="btnType">Type serial</button></div>
   <div class="roomline"><span>${rt ? 'Room: R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'Not placed in room'}</span><button class="link" id="btnRoom">Room layout</button><button class="link" id="btnQual">Quality: ${S.prefs.res === 'normal' ? 'Normal' : 'High'}</button></div>
+  <div class="qrline"><span>String QR code: <b id="qrTxt"></b></span><button class="link" id="btnQR"></button></div>
   <div class="banner" id="banner"></div>
+  <div id="qrActions"></div>
   <div id="rackWrap"></div>
   <div id="doneWrap"></div>`;
   $('#btnCam').addEventListener('click', () => cam.running ? stopCam() : startCam());
-  $('#btnType').addEventListener('click', () => { if (S.pos) openSlot(S.pos.shelf, S.pos.module, true); });
+  $('#btnType').addEventListener('click', () => { if (cam.step === 'qr') openQr(true); else if (S.pos) openSlot(S.pos.shelf, S.pos.module, true); });
+  $('#btnQR').addEventListener('click', () => { const s2 = cur(); if (s2.qr) openQr(false); else { cam.step = 'qr'; cam.armed = true; updateScan(); if (!cam.running) startCam(); else setMsg('Scanning\u2026 aim at the string QR code'); } });
   $('#btnLayout').addEventListener('click', () => { stopCam(); startLayout(st); });
   $('#btnRoom').addEventListener('click', () => { stopCam(); go('room'); });
   $('#btnQual').addEventListener('click', async () => {
@@ -619,6 +638,7 @@ function renderScan() {
     const b = e.target.closest('.cell'); if (!b) return;
     const s = +b.dataset.s, m = +b.dataset.m, v = cur().slots[key(s, m)];
     const active = S.pos.shelf === s && S.pos.module === m;
+    if (cam.step === 'qr') { cam.step = 'mod'; cam.armed = true; }
     if (!v && !active) { S.pos = { shelf: s, module: m }; cam.armed = true; save(false); updateScan(); }
     else openSlot(s, m);
   });
@@ -629,7 +649,16 @@ function updateScan() {
   const c = counts(st), done = c.ok + c.missing, complete = c.empty === 0;
   const lastTxt = cam.lastSaved ? '<br>Last \u2713 ' + esc(cam.lastSaved) : '';
   const b = $('#banner');
-  if (complete) { b.className = 'banner done'; b.innerHTML = '<b>String complete</b><span>' + done + ' of ' + c.total + ' done' + lastTxt + '</span>'; }
+  const qt = $('#qrTxt'); if (qt) { qt.textContent = st.qr ? qrShort(st.qr.text) : st.qrSkip ? 'skipped' : 'not scanned'; $('#btnQR').textContent = st.qr ? 'Details' : 'Scan QR'; }
+  const bt = $('#btnType'); if (bt) bt.textContent = cam.step === 'qr' ? 'Type QR' : 'Type serial';
+  const ci2 = $('#camInfo'); if (ci2 && !cam.running) ci2.textContent = hint();
+  const qa = $('#qrActions');
+  if (cam.step === 'qr') {
+    qa.innerHTML = '<button class="btn wide" id="qrSkip">Skip the QR code</button>';
+    $('#qrSkip').addEventListener('click', () => { st.qrSkip = true; cam.step = 'mod'; cam.armed = !!firstEmpty(st); save(); setMsg(cam.running ? 'Scanning\u2026 aim at the barcode' : 'Tap Start camera'); updateScan(); });
+  } else qa.innerHTML = '';
+  if (cam.step === 'qr') { b.className = 'banner qr'; b.innerHTML = '<b>Step 1: scan the string QR code</b><span>battery passport</span>'; }
+  else if (complete) { b.className = 'banner done'; b.innerHTML = '<b>String complete</b><span>' + done + ' of ' + c.total + ' done' + lastTxt + '</span>'; }
   else if (!cam.armed) { b.className = 'banner'; b.innerHTML = '<b>Paused</b><span>' + done + ' of ' + c.total + ' done<br>Tap an empty module</span>'; }
   else { b.className = 'banner'; b.innerHTML = '<b>Shelf ' + S.pos.shelf + ' \u00b7 Module ' + S.pos.module + '</b><span>' + done + ' of ' + c.total + ' done' + lastTxt + '</span>'; }
   $('#rackWrap').innerHTML = rackPreview(st.shelves, st.slots, complete ? null : S.pos, true);
@@ -694,7 +723,9 @@ async function startCam() {
     await initNative();
     if (!cam.stream) return;               // stopped while loading
     cam.running = true; const rid = ++cam.runId; cam.passN = 0; cam.lastCT = -1;
-    const st = cur(); if (st && !firstEmpty(st)) { cam.armed = false; setMsg('String complete. Tap a module to rescan it.'); } else setMsg('Scanning\u2026 aim at the barcode');
+    const st = cur();
+    if (cam.step === 'qr') { cam.armed = true; setMsg('Scanning\u2026 aim at the string QR code'); }
+    else if (st && !firstEmpty(st)) { cam.armed = false; setMsg('String complete. Tap a module to rescan it.'); } else setMsg('Scanning\u2026 aim at the barcode');
     updateScan();
     cam.stats = { n: 0, ms: 0, t0: performance.now() };
     cam.sint = setInterval(updateInfo, 1500);
@@ -715,7 +746,7 @@ function stopCam(keepMsg) {
   const v = $('#vid'); if (v) v.srcObject = null;
   const off = $('#camOff'); if (off) off.style.display = 'flex';
   const cc = $('#cam'); if (cc) cc.classList.add('idle');
-  const ci = $('#camInfo'); if (ci) ci.textContent = HINT;
+  const ci = $('#camInfo'); if (ci) ci.textContent = hint();
   const b = $('#btnCam'); if (b) b.textContent = 'Start camera';
   const tb = $('#btnTorch'); if (tb) { tb.hidden = true; tb.setAttribute('aria-pressed', 'false'); }
   if (!keepMsg) setMsg('Camera is off. Tap Start camera');
@@ -726,7 +757,7 @@ function updateInfo() {
   const set = cam.track && cam.track.getSettings ? cam.track.getSettings() : {};
   const eng = cam.det ? (cam.workerReady ? 'phone reader + ZXing' : 'phone reader') : (cam.workerReady ? 'ZXing' : 'ZXing (slow mode)');
   const avg = cam.stats.n ? Math.round(cam.stats.ms / cam.stats.n) : 0;
-  ci.textContent = 'Camera ' + (set.width || '?') + '\u00d7' + (set.height || '?') + ' \u00b7 ' + eng + ' \u00b7 ' + (cam.stats.n / dt).toFixed(1) + ' reads/s' + (avg ? ' (' + avg + ' ms)' : '') + '. ' + HINT;
+  ci.textContent = 'Camera ' + (set.width || '?') + '\u00d7' + (set.height || '?') + ' \u00b7 ' + eng + ' \u00b7 ' + (cam.stats.n / dt).toFixed(1) + ' reads/s' + (avg ? ' (' + avg + ' ms)' : '') + '. ' + hint();
   cam.stats = { n: 0, ms: 0, t0: performance.now() };
 }
 async function toggleTorch() {
@@ -747,6 +778,7 @@ function visRect() {
   return { sx, sy, sw, sh };
 }
 function nextPass() {
+  if (cam.step === 'qr') { const q = ['qr', 'qrhi'][cam.passN++ % 2]; return Object.assign({}, PASS_QR[q]); }
   let p = CYCLE[cam.passN++ % CYCLE.length];
   if (p === 'hires' && cam.srcW <= 1500) p = 'band';
   const pass = Object.assign({}, PASS[p]);
@@ -785,15 +817,16 @@ async function pumpWorker(rid) {
 async function pumpNative(rid) {
   if (!cam.running || rid !== cam.runId || !cam.det) return;
   const v = $('#vid');
-  if (cam.armed && !document.hidden && !sheetOpen() && !cam.nbusy && v && v.videoWidth) {
+  const det = cam.step === 'qr' ? (cam.dets && cam.dets.qr) : (cam.dets && cam.dets.mod);
+  if (det && cam.armed && !document.hidden && !sheetOpen() && !cam.nbusy && v && v.videoWidth) {
     cam.nbusy = true;
     try {
       const t0 = performance.now();
-      const r = await cam.det.detect(v);
+      const r = await det.detect(v);
       if (!cam.running || rid !== cam.runId) { cam.nbusy = false; return; }
       cam.stats.n++; cam.stats.ms += performance.now() - t0; cam.nfail = 0;
       const R = visRect();
-      if (R && r.length) onCodes(r.filter(c => c.rawValue).map(c => ({ text: c.rawValue, format: 'Code128', pts: (c.cornerPoints && c.cornerPoints.length === 4 ? c.cornerPoints : [{ x: c.boundingBox.x, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y + c.boundingBox.height }, { x: c.boundingBox.x, y: c.boundingBox.y + c.boundingBox.height }]).map(p => ({ x: (p.x - R.sx) / R.sw, y: (p.y - R.sy) / R.sh })) })));
+      if (R && r.length) onCodes(r.filter(c => c.rawValue).map(c => ({ text: c.rawValue, format: cam.step === 'qr' ? 'QRCode' : 'Code128', pts: (c.cornerPoints && c.cornerPoints.length === 4 ? c.cornerPoints : [{ x: c.boundingBox.x, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y }, { x: c.boundingBox.x + c.boundingBox.width, y: c.boundingBox.y + c.boundingBox.height }, { x: c.boundingBox.x, y: c.boundingBox.y + c.boundingBox.height }]).map(p => ({ x: (p.x - R.sx) / R.sw, y: (p.y - R.sy) / R.sh })) })));
     } catch (e) { if (++cam.nfail > 5) cam.det = null; }
     cam.nbusy = false;
   }
@@ -808,7 +841,22 @@ function onCodes(list) {
   const best = inView[0], outcome = handleRead(best);
   drawBox(best.pts, outcome === 'dup' ? '#ff5a4f' : outcome === 'warn' ? '#ffb454' : '#3ddc84');
 }
+function handleQr(r) {
+  const st = cur(); if (!st) return '';
+  const text = r.text.trim(), now = Date.now();
+  if (text === cam.last.text && now - cam.last.t < 2500) { cam.last.t = now; return cam.last.outcome; }
+  cam.last = { text, t: now, outcome: '' };
+  const dup = findQr(text, st.id);
+  if (dup) { cam.last.outcome = 'dup'; feedback('bad', 'This QR code is already used by String ' + dup.st.name + ' (' + sysTitle(dup.sys) + ')', '', 'QR already used', 'String ' + dup.st.name); return 'dup'; }
+  st.qr = { text, raw: r.text, format: r.format || 'QRCode', method: 'scan', at: new Date().toISOString() }; st.qrSkip = false;
+  cam.step = 'mod'; cam.armed = !!firstEmpty(st);
+  cam.last.outcome = 'ok'; save();
+  feedback('ok', 'String QR saved: ' + text + '. Now scan the modules.', '', 'String QR saved', '\u2026' + text.slice(-12));
+  updateScan();
+  return 'ok';
+}
 function handleRead(r) {
+  if (cam.step === 'qr') return handleQr(r);
   const st = cur(); if (!st) return '';
   const text = r.text.trim(), now = Date.now();
   if (text === cam.last.text && now - cam.last.t < 2500) { cam.last.t = now; return cam.last.outcome; }
@@ -1008,6 +1056,32 @@ function openRoomCell(r, c) {
 }
 
 
+/* ================= string QR sheet ================= */
+function openQr(typeFirst) {
+  const st = cur(), q = st.qr;
+  openSheet(`<h3>String ${esc(st.name)} \u00b7 QR code</h3>
+    ${q ? `<div class="serial" style="font-size:.95rem">${esc(q.text)}</div><p class="hint">${q.method === 'manual' ? 'Typed' : 'Scanned'} ${localTime(q.at)}</p>` : '<p class="hint">No QR code saved for this string.</p>'}
+    <button class="btn primary wide" id="qScan">${q ? 'Rescan the QR code' : 'Scan the QR code'}</button>
+    <button class="btn wide" id="qType">Type or paste the QR text</button>
+    <div id="qBox" style="display:${typeFirst ? 'block' : 'none'};margin-top:8px"><input id="qText" placeholder="QR code text" autocomplete="off" autocapitalize="off" spellcheck="false" value="${q && q.method === 'manual' ? esc(q.text) : ''}"><div class="row" style="margin-top:8px"><button class="btn primary" id="qSave">Save QR code</button></div></div>
+    ${q ? '<button class="btn danger wide" id="qClear">Remove the QR code</button>' : ''}
+    <button class="btn wide" id="qClose">Close</button>`);
+  if (typeFirst) setTimeout(() => $('#qText') && $('#qText').focus(), 50);
+  $('#qClose').addEventListener('click', closeSheet);
+  $('#qScan').addEventListener('click', () => { closeSheet(); cam.step = 'qr'; cam.armed = true; updateScan(); if (!cam.running) startCam(); else setMsg('Scanning\u2026 aim at the string QR code'); });
+  $('#qType').addEventListener('click', () => { $('#qBox').style.display = 'block'; $('#qText').focus(); });
+  $('#qSave').addEventListener('click', () => {
+    const t = $('#qText').value.trim();
+    if (!t) { toast('Type or paste the QR text'); return; }
+    const dup = findQr(t, st.id);
+    if (dup) { toast('Already used by String ' + dup.st.name + ' (' + sysTitle(dup.sys) + ')'); return; }
+    st.qr = { text: t, raw: t, format: '', method: 'manual', at: new Date().toISOString() }; st.qrSkip = false;
+    if (cam.step === 'qr') { cam.step = 'mod'; cam.armed = !!firstEmpty(st); }
+    save(); closeSheet(); updateScan();
+  });
+  const qc = $('#qClear'); if (qc) qc.addEventListener('click', () => { delete st.qr; save(); closeSheet(); updateScan(); });
+}
+
 /* ================= slot sheet ================= */
 function openSlot(s, m, typeFirst) {
   const st = cur(), v = st.slots[key(s, m)];
@@ -1063,10 +1137,10 @@ function allRows(incompleteOk) {
 /* ---------- Excel (.xlsx) writer: small, no libraries, works offline ---------- */
 function tableData() {
   const j = S.job, now = new Date().toISOString();
-  const H = ['vessel', 'project', 'system', 'string', 'room_row', 'room_col', 'shelf', 'module', 'position', 'serial', 'model', 'status', 'check', 'scanned_at', 'entry', 'barcode_format', 'engineer', 'company', 'exported_at'];
+  const H = ['vessel', 'project', 'system', 'string', 'string_qr', 'room_row', 'room_col', 'shelf', 'module', 'position', 'serial', 'model', 'status', 'check', 'scanned_at', 'entry', 'barcode_format', 'engineer', 'company', 'exported_at'];
   const rows = allRows().map(({ st, s, m, v }) => {
     const rc = cellOf(st.id);
-    return [j.vessel, j.project, j.system, st.name, rc ? rc.r : '', rc ? rc.c : '', s, m, posCode(st, s, m), v && v.serial || '', v && v.model || '', !v ? 'EMPTY' : v.status === 'ok' ? 'OK' : 'MISSING', v && v.flag ? 'FORMAT?' : '', v && v.at && v.status === 'ok' ? v.at : '', v && v.status === 'ok' ? v.method : '', v && v.format || '', j.engineer, j.company, now];
+    return [j.vessel, j.project, j.system, st.name, st.qr ? st.qr.text : '', rc ? rc.r : '', rc ? rc.c : '', s, m, posCode(st, s, m), v && v.serial || '', v && v.model || '', !v ? 'EMPTY' : v.status === 'ok' ? 'OK' : 'MISSING', v && v.flag ? 'FORMAT?' : '', v && v.at && v.status === 'ok' ? v.at : '', v && v.status === 'ok' ? v.method : '', v && v.format || '', j.engineer, j.company, now];
   });
   return { H, rows };
 }
@@ -1125,7 +1199,7 @@ const sheetLoc = (sheet, cell) => "'" + sheet.replace(/'/g, "''") + "'!" + cell;
 // one sheet per string: the rack as it stands, top shelf first, modules left to right
 function stringSheet(st) {
   const N = Math.max(...st.shelves), k = counts(st), rc = cellOf(st.id);
-  const rows = [[{ v: 'String ' + st.name, s: 7 }], [{ v: rc ? 'Room: row ' + rc.r + ', column ' + rc.c : 'Not placed in the room', s: 0 }], [{ v: '\u2190 Back to Room', s: 20 }], [],
+  const rows = [[{ v: 'String ' + st.name, s: 7 }], [{ v: rc ? 'Room: row ' + rc.r + ', column ' + rc.c : 'Not placed in the room', s: 0 }], [{ v: '\u2190 Back to Room', s: 20 }], [{ v: 'String QR code', s: 7 }, { v: st.qr ? st.qr.text : (st.qrSkip ? 'skipped' : 'not scanned'), s: 0 }],
     [{ v: 'Shelf', s: 1 }].concat(Array.from({ length: N }, (_, i) => ({ v: 'Module ' + (i + 1), s: 1 })))];
   const hts = {}; hts[4] = 20;
   for (let sh = st.shelves.length; sh >= 1; sh--) {
@@ -1150,16 +1224,17 @@ function xlsxBlob() {
   sts.forEach(st => { nameOf[st.id] = sheetNameFor(st.name, used); });
   const stat = v => v === 'OK' ? 3 : v === 'EMPTY' ? 5 : v === 'MISSING' ? 6 : 2;
   // Sheet 1: Modules
-  const num = new Set([4, 5, 6, 7]);
-  const s1 = [T.H.map(h => ({ v: h, s: 1 }))].concat(T.rows.map(r => r.map((c, i) => ({ v: c, s: i === 11 ? stat(c) : i === 12 && c ? 4 : (num.has(i) ? 8 : 2) }))));
-  const w1 = [16, 10, 12, 8, 11, 11, 8, 9, 14, 22, 16, 10, 10, 22, 9, 15, 16, 14, 24];
+  const iOf = n => T.H.indexOf(n), num = new Set(['room_row', 'room_col', 'shelf', 'module'].map(iOf)), iSt = iOf('status'), iCk = iOf('check');
+  const s1 = [T.H.map(h => ({ v: h, s: 1 }))].concat(T.rows.map(r => r.map((c, i) => ({ v: c, s: i === iSt ? stat(c) : i === iCk && c ? 4 : (num.has(i) ? 8 : 2) }))));
+  const W = { vessel: 16, project: 10, system: 12, string: 8, string_qr: 34, room_row: 11, room_col: 11, shelf: 8, module: 9, position: 14, serial: 22, model: 16, status: 10, check: 10, scanned_at: 22, entry: 9, barcode_format: 15, engineer: 16, company: 14, exported_at: 24 };
+  const w1 = T.H.map(n => W[n] || 12);
   // Sheet 2: Summary (string names are links)
   const sum = [[{ v: 'Module scan summary', s: 7 }], [], [{ v: 'Vessel', s: 7 }, j.vessel], [{ v: 'Project', s: 7 }, j.project], [{ v: 'System / BMS', s: 7 }, j.system], [{ v: 'Engineer', s: 7 }, j.engineer], [{ v: 'Company', s: 7 }, j.company], [{ v: 'Exported', s: 7 }, localDate() + ' ' + pad2(new Date().getHours()) + ':' + pad2(new Date().getMinutes())], [{ v: 'Room drawn as seen from', s: 7 }, R.viewFrom], [],
-    ['String (click to open)', 'Room row', 'Room column', 'Shelves', 'Modules per shelf (bottom to top)', 'OK', 'Missing', 'Empty'].map(h => ({ v: h, s: 1 }))];
+    ['String (click to open)', 'Room row', 'Room column', 'Shelves', 'Modules per shelf (bottom to top)', 'OK', 'Missing', 'Empty', 'String QR code (battery passport)'].map(h => ({ v: h, s: 1 }))];
   const sumLinks = []; let tOk = 0, tMi = 0, tEm = 0;
   sts.forEach(st => { const c = counts(st), rc = cellOf(st.id); tOk += c.ok; tMi += c.missing; tEm += c.empty;
     sumLinks.push({ ref: 'A' + (sum.length + 1), loc: sheetLoc(nameOf[st.id], 'A1'), tip: 'Open String ' + st.name });
-    sum.push([{ v: 'String ' + st.name, s: 21 }, { v: rc ? rc.r : '', s: 8 }, { v: rc ? rc.c : '', s: 8 }, { v: st.shelves.length, s: 8 }, { v: st.shelves.join(' / '), s: 2 }, { v: c.ok, s: c.ok ? 3 : 8 }, { v: c.missing, s: c.missing ? 6 : 8 }, { v: c.empty, s: c.empty ? 5 : 8 }]); });
+    sum.push([{ v: 'String ' + st.name, s: 21 }, { v: rc ? rc.r : '', s: 8 }, { v: rc ? rc.c : '', s: 8 }, { v: st.shelves.length, s: 8 }, { v: st.shelves.join(' / '), s: 2 }, { v: c.ok, s: c.ok ? 3 : 8 }, { v: c.missing, s: c.missing ? 6 : 8 }, { v: c.empty, s: c.empty ? 5 : 8 }, { v: st.qr ? st.qr.text : '', s: 2 }]); });
   sum.push([{ v: 'Total', s: 7 }, null, null, null, null, { v: tOk, s: 8 }, { v: tMi, s: 8 }, { v: tEm, s: 8 }]);
   // Sheet 3: Room (string cells are links to the string sheets)
   const room = [[{ v: '', s: 1 }].concat(Array.from({ length: R.cols }, (_, i) => ({ v: 'Column ' + (i + 1), s: 1 })))], hts = { 0: 20 }, roomLinks = [];
@@ -1185,7 +1260,7 @@ function xlsxBlob() {
   }
   const sheets = [
     { name: 'Modules', xml: sheetXml(s1, { widths: w1, freeze: true, filter: true }) },
-    { name: 'Summary', xml: sheetXml(sum, { widths: [24, 10, 12, 9, 34, 8, 9, 8], links: sumLinks }) },
+    { name: 'Summary', xml: sheetXml(sum, { widths: [24, 10, 12, 9, 34, 8, 9, 8, 44], links: sumLinks }) },
     { name: 'Room', xml: sheetXml(room, { widths: [10].concat(Array(R.cols).fill(18)), heights: hts, links: roomLinks, selected: true }) }
   ];
   sts.forEach(st => { const ss = stringSheet(st); ss.opts.links = [{ ref: 'A3', loc: sheetLoc('Room', 'A1'), tip: 'Back to Room' }]; sheets.push({ name: nameOf[st.id], xml: sheetXml(ss.rows, ss.opts) }); });
@@ -1247,6 +1322,7 @@ function jsonText() {
     room: { rows: S.room.rows, cols: S.room.cols, viewFrom: S.room.viewFrom, note: 'Row 1 is the top of the map, column 1 is the left.' },
     strings: sortedStrings().map(st => ({
       name: st.name, roomRow: (cellOf(st.id) || {}).r || null, roomCol: (cellOf(st.id) || {}).c || null, shelves: st.shelves,
+      batteryPassportQr: st.qr ? { text: st.qr.text, format: st.qr.format || null, entry: st.qr.method, scannedAt: st.qr.at } : null, qrSkipped: !!st.qrSkip,
       modules: (() => { const a = []; eachSlot(st, (s, m, v) => a.push({ shelf: s, module: m, position: posCode(st, s, m), status: !v ? 'empty' : v.status, serial: v && v.serial || null, model: v && v.model || null, rawBarcode: v && v.raw || null, barcodeFormat: v && v.format || null, entry: v && v.method || null, check: v && v.flag || null, scannedAt: v && v.at || null })); return a; })()
     }))
   }, null, 2);
@@ -1268,7 +1344,7 @@ function renderExport() {
     <h2>${esc(S.job.vessel || 'Vessel')} \u00b7 ${esc(S.job.system || 'System')}</h2>
     <p class="hint">Project ${esc(S.job.project || '-')} \u00b7 ${esc(S.job.engineer || '-')} \u00b7 ${localDate()}</p>
     <table><thead><tr><th>String</th><th>Room / layout</th><th class="n">OK</th><th class="n">Missing</th><th class="n">Empty</th></tr></thead><tbody>
-    ${sts.map(st => { const c = counts(st); return `<tr><td><b>${esc(st.name)}</b></td><td>${cellOf(st.id) ? 'R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'not placed'}<br><span class="hint">${st.shelves.length} shelves (${st.shelves.join('/')})</span></td><td class="n okc">${c.ok}</td><td class="n">${c.missing}</td><td class="n ${c.empty ? 'bad' : ''}">${c.empty}</td></tr>`; }).join('')}
+    ${sts.map(st => { const c = counts(st); return `<tr><td><b>${esc(st.name)}</b></td><td>${cellOf(st.id) ? 'R' + cellOf(st.id).r + ' \u00b7 C' + cellOf(st.id).c : 'not placed'}<br><span class="hint">${st.shelves.length} shelves (${st.shelves.join('/')}) \u00b7 ${st.qr ? 'QR \u2713' : 'no QR'}</span></td><td class="n okc">${c.ok}</td><td class="n">${c.missing}</td><td class="n ${c.empty ? 'bad' : ''}">${c.empty}</td></tr>`; }).join('')}
     </tbody></table>
     ${complete ? '<p class="hint okc"><b>All positions are filled or marked as missing.</b></p>' : `<p class="hint bad"><b>Not finished:</b> ${bad.map(s => 'String ' + esc(s.name) + ' (' + counts(s).empty + ' empty)').join(', ') || 'no strings yet'}.</p>`}
   </section>
